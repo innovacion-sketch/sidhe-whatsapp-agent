@@ -1,0 +1,20 @@
+# Solo para desarrollo local. En producción la DB es el servicio sidhe-postgres de Easypanel.
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: sidhe
+    ports:
+      - "5432:5432"
+    volumes:
+      - sidhe_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d sidhe"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  sidhe_pgdata:

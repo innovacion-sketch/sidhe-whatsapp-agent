@@ -1,0 +1,13 @@
+# Secretos — NUNCA committear credenciales
+.env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+dist/
+*.egg-info/
+
+# Nota: uv.lock y data/sucursales.csv SÍ se committean —
+# el Dockerfile usa --frozen y el seed del contenedor lee el CSV.
