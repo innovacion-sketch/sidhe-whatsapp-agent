@@ -111,19 +111,36 @@ async def test_listar_zonas(datos):
     assert {"zona": "Guadalajara", "sucursales": 1} in zonas
 
 
-async def test_disponibilidad_solo_slots_con_cupo(datos):
+async def test_disponibilidad_rango_devuelve_fechas(datos):
+    """Rango de varios dias: agrega por fecha para el primer list-picker."""
     hoy = datetime.date.today().isoformat()
     fin = (datetime.date.today() + datetime.timedelta(days=13)).isoformat()
-    slots = await _consultar_disponibilidad(datos["perisur_id"], hoy, fin)
-    assert [s["slot_id"] for s in slots] == [
-        datos["slot_11"], datos["slot_12"], datos["slot_pasado"],
-    ]
-    assert slots[0]["fecha_legible"] == fecha_legible(MANANA)
+    resultado = await _consultar_disponibilidad(datos["perisur_id"], hoy, fin)
 
-    # Al llenarse un slot, desaparece de la disponibilidad
+    assert resultado["tipo"] == "fechas"
+    fechas = {f["fecha"]: f["horarios_disponibles"] for f in resultado["fechas"]}
+    assert fechas == {MANANA.isoformat(): 2, PASADO.isoformat(): 1}
+    assert resultado["fechas"][0]["fecha_legible"] == fecha_legible(MANANA)
+
+
+async def test_disponibilidad_un_dia_devuelve_horarios(datos):
+    """Mismo dia en inicio y fin: horarios con slot_id para el segundo picker."""
+    resultado = await _consultar_disponibilidad(
+        datos["perisur_id"], MANANA.isoformat(), MANANA.isoformat()
+    )
+    assert resultado["tipo"] == "horarios"
+    assert [h["slot_id"] for h in resultado["horarios"]] == [
+        datos["slot_11"], datos["slot_12"],
+    ]
+    assert resultado["horarios"][0]["hora_inicio"] == "11:00"
+
+
+async def test_disponibilidad_excluye_slots_llenos(datos):
     await _agendar_cita(datos["slot_11"], "Ana", TEL_ANA, "whatsapp")
-    slots = await _consultar_disponibilidad(datos["perisur_id"], hoy, fin)
-    assert datos["slot_11"] not in [s["slot_id"] for s in slots]
+    resultado = await _consultar_disponibilidad(
+        datos["perisur_id"], MANANA.isoformat(), MANANA.isoformat()
+    )
+    assert [h["slot_id"] for h in resultado["horarios"]] == [datos["slot_12"]]
 
 
 async def test_disponibilidad_fechas_invalidas(datos):

@@ -18,6 +18,7 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.store.postgres.aio import AsyncPostgresStore
+from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 from pydantic import BaseModel
 from sqlalchemy import select, text
@@ -37,6 +38,11 @@ from .tools.citas import fecha_legible
 logger = structlog.get_logger(__name__)
 
 RUTA_SYSTEM_PROMPT = Path(__file__).parent / "graph" / "prompts" / "system.md"
+LIMITE_PASOS_GRAFO = 30
+MENSAJE_ATORADO = (
+    "Perdón, me enredé buscando esa información. ¿Me dices de nuevo qué "
+    "necesitas? Si prefieres, puedo pasarte con un asesor."
+)
 MENSAJE_ERROR_CLIENTE = (
     "Lo siento, tuve un problema técnico al procesar tu mensaje. "
     "¿Podrías intentarlo de nuevo en un momento?"
@@ -192,7 +198,9 @@ async def procesar_mensaje(app: FastAPI, entrante: IncomingMessage) -> None:
     )
     try:
         config = {
-            "configurable": {"thread_id": f"{entrante.canal}:{entrante.user_id}"}
+            "configurable": {"thread_id": f"{entrante.canal}:{entrante.user_id}"},
+            # Corta bucles de tools antes de gastar tokens de mas.
+            "recursion_limit": LIMITE_PASOS_GRAFO,
         }
         # Thread pausado por escalamiento: el bot guarda silencio; los mensajes
         # del cliente los atiende el asesor humano hasta que el escalamiento se
@@ -242,6 +250,16 @@ async def procesar_mensaje(app: FastAPI, entrante: IncomingMessage) -> None:
             twilio_sid=sid,
         )
         log.info("respuesta_enviada", twilio_sid=sid)
+    except GraphRecursionError:
+        # El agente se atoro en un bucle de tools: no dejar al cliente sin salida.
+        log.exception("limite_de_pasos_agotado")
+        try:
+            await app.state.adapter.send(
+                entrante.user_id, OutgoingMessage(texto=MENSAJE_ATORADO)
+            )
+        except Exception:
+            log.exception("error_enviando_mensaje_de_atasco")
+        return
     except Exception:
         log.exception("error_procesando_mensaje")
         try:

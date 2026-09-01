@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 
 from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from ..config import get_settings
@@ -61,7 +61,13 @@ def _condicion_futuro(ahora: datetime.datetime):
 
 async def _consultar_disponibilidad(
     sucursal_id: int, fecha_inicio: str, fecha_fin: str
-) -> list[dict] | dict:
+) -> dict:
+    """Rango de varios dias -> FECHAS con cupo; un solo dia -> HORARIOS.
+
+    Devolver horarios de todo el rango no sirve al flujo de agendado: el
+    limite de resultados se consumia con el primer dia y el agente nunca veia
+    las demas fechas (y las reconsultaba en bucle).
+    """
     try:
         inicio = datetime.date.fromisoformat(fecha_inicio)
         fin = datetime.date.fromisoformat(fecha_fin)
@@ -74,20 +80,46 @@ async def _consultar_disponibilidad(
     if fin < inicio:
         return {"error": "rango_invalido"}
 
+    condiciones = (
+        Slot.sucursal_id == sucursal_id,
+        Slot.fecha >= inicio,
+        Slot.fecha <= fin,
+        Slot.reservados < Slot.capacidad,
+        _condicion_futuro(ahora),
+    )
+
     async with get_session() as session:
-        resultado = await session.execute(
-            select(Slot)
-            .where(
-                Slot.sucursal_id == sucursal_id,
-                Slot.fecha >= inicio,
-                Slot.fecha <= fin,
-                Slot.reservados < Slot.capacidad,
-                _condicion_futuro(ahora),
+        if inicio == fin:
+            resultado = await session.execute(
+                select(Slot)
+                .where(*condiciones)
+                .order_by(Slot.hora_inicio)
+                .limit(MAX_RESULTADOS)
             )
-            .order_by(Slot.fecha, Slot.hora_inicio)
+            horarios = [_slot_a_dict(s) for s in resultado.scalars()]
+            return {
+                "tipo": "horarios",
+                "fecha": inicio.isoformat(),
+                "fecha_legible": fecha_legible(inicio),
+                "horarios": horarios,
+            }
+
+        resultado = await session.execute(
+            select(Slot.fecha, func.count(Slot.id))
+            .where(*condiciones)
+            .group_by(Slot.fecha)
+            .order_by(Slot.fecha)
             .limit(MAX_RESULTADOS)
         )
-        return [_slot_a_dict(s) for s in resultado.scalars()]
+        fechas = [
+            {
+                "fecha": fecha.isoformat(),
+                "fecha_legible": fecha_legible(fecha),
+                "horarios_disponibles": conteo,
+            }
+            for fecha, conteo in resultado.all()
+        ]
+        return {"tipo": "fechas", "fechas": fechas}
 
 
 async def _alternativas(session, slot: Slot) -> list[dict]:
@@ -210,18 +242,29 @@ async def _cancelar_cita(cita_id: int, telefono: str) -> dict:
 @tool
 async def consultar_disponibilidad(
     sucursal_id: int, fecha_inicio: str, fecha_fin: str
-) -> list[dict] | dict:
-    """Consulta los horarios disponibles para estudio de pisada en una sucursal.
+) -> dict:
+    """Consulta disponibilidad para estudio de pisada en una sucursal.
 
-    Devuelve máximo 10 slots con cupo ordenados por fecha y hora, dentro de
-    una ventana máxima de 14 días. Cada slot trae slot_id, fecha (ISO),
-    fecha_legible (ej. "Lun 20 jul"), hora_inicio y hora_fin. Presenta primero
-    las FECHAS con presentar_opciones y después los HORARIOS del día elegido.
+    Se usa en DOS pasos distintos segun el rango que pidas:
+
+    1) FECHAS: pide un rango de varios dias (ej. de hoy a 13 dias despues) y
+       devuelve {"tipo": "fechas", "fechas": [{"fecha", "fecha_legible",
+       "horarios_disponibles"}]} con hasta 10 dias que tienen cupo. Presenta
+       esas fechas con presentar_opciones (id "fecha_<YYYY-MM-DD>").
+
+    2) HORARIOS: cuando el cliente elija un dia, vuelve a llamarla con
+       fecha_inicio Y fecha_fin IGUALES a esa fecha; devuelve
+       {"tipo": "horarios", "horarios": [{"slot_id", "hora_inicio", ...}]}.
+       Presenta esos horarios con presentar_opciones (id "slot_<slot_id>").
+
+    Nunca pidas mas de 14 dias. Si una lista viene vacia, informa al cliente
+    que no hay cupo en ese rango y ofrece otro periodo.
 
     Args:
         sucursal_id: id de la sucursal (de buscar_sucursal).
-        fecha_inicio: primera fecha a consultar, formato YYYY-MM-DD.
-        fecha_fin: última fecha a consultar, formato YYYY-MM-DD.
+        fecha_inicio: primera fecha, formato YYYY-MM-DD.
+        fecha_fin: ultima fecha, formato YYYY-MM-DD (igual a fecha_inicio
+            para obtener los horarios de ese dia).
     """
     return await _consultar_disponibilidad(sucursal_id, fecha_inicio, fecha_fin)
 
