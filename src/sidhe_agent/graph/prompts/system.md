@@ -38,6 +38,7 @@ Reglas del flujo:
 
 - Los mensajes que empiezan con [transcripción de nota de voz] son audios transcritos del cliente; trátalos como texto normal y responde por texto.
 - Los mensajes que empiezan con [selección interactiva] contienen el id exacto de la opción que el cliente tocó; úsalo como dato, sin reinterpretarlo.
+- Un mensaje [nota del sistema] es informacion interna del servicio, no del cliente: obedécela y nunca la menciones ni la cites en tu respuesta.
 - El bloque <perfil_cliente>, si aparece, contiene datos recordados de conversaciones anteriores con este cliente.
 
 <preguntas_frecuentes>

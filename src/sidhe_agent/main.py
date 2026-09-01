@@ -39,6 +39,12 @@ logger = structlog.get_logger(__name__)
 
 RUTA_SYSTEM_PROMPT = Path(__file__).parent / "graph" / "prompts" / "system.md"
 LIMITE_PASOS_GRAFO = 30
+NOTA_ESCALAMIENTO_RESUELTO = (
+    "[nota del sistema] Un asesor humano ya atendió el escalamiento anterior "
+    "y la conversación vuelve a estar a tu cargo. Retoma la atención con "
+    "normalidad: si el cliente pide algo que puedes resolver (como agendar "
+    "una cita), hazlo tú mismo y no digas que hay un asesor en camino."
+)
 MENSAJE_ATORADO = (
     "Perdón, me enredé buscando esa información. ¿Me dices de nuevo qué "
     "necesitas? Si prefieres, puedo pasarte con un asesor."
@@ -439,6 +445,17 @@ async def resolver_escalamiento(
     if any(t.interrupts for t in snapshot.tasks):
         await app.state.graph.ainvoke(Command(resume="atendido"), config)
         reanudado = True
+
+    # Sin esta nota el historial sigue diciendo "ya te escale" y el agente se
+    # niega a retomar el caso. Se agrega al hilo SIN invocar el grafo, para no
+    # enviarle un mensaje al cliente por nuestra cuenta.
+    await app.state.graph.aupdate_state(
+        config,
+        {
+            "messages": [HumanMessage(content=NOTA_ESCALAMIENTO_RESUELTO)],
+            "escalado": False,
+        },
+    )
 
     return {
         "ok": True,
