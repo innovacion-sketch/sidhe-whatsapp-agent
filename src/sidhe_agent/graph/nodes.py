@@ -7,8 +7,10 @@ juntos. El bloque dinámico (perfil/resumen) va DESPUÉS del breakpoint para no
 invalidar el caché en cada turno.
 """
 
+import datetime
 import json
 from typing import Any, Awaitable, Callable
+from zoneinfo import ZoneInfo
 
 import structlog
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
@@ -16,6 +18,7 @@ from langchain_core.runnables import Runnable
 from langgraph.store.base import BaseStore
 from langgraph.types import interrupt
 
+from ..config import get_settings
 from ..graph.state import AgentState
 from ..memory.long_term import PROMPT_EXTRACCION, guardar_perfil, leer_perfil
 from ..memory.summarizer import _transcript
@@ -38,6 +41,34 @@ def make_cargar_memoria(
     return cargar_memoria
 
 
+DIAS_SEMANA = [
+    "lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo",
+]
+MESES = [
+    "enero", "febrero", "marzo", "abril", "mayo", "junio",
+    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+]
+
+
+def _contexto_temporal() -> str:
+    """Fecha y hora actuales en la zona del negocio.
+
+    El modelo no sabe que dia es hoy: sin esto inventaba fechas de su
+    entrenamiento y consultar_disponibilidad las rechazaba por rango
+    invalido. Va en el bloque dinamico, despues del breakpoint de cache.
+    """
+    ahora = datetime.datetime.now(ZoneInfo(get_settings().tz))
+    return (
+        "<contexto_temporal>\n"
+        f"Hoy es {DIAS_SEMANA[ahora.weekday()]} {ahora.day} de "
+        f"{MESES[ahora.month - 1]} de {ahora.year} "
+        f"({ahora.strftime('%Y-%m-%d')}), {ahora.strftime('%H:%M')} hora de "
+        "Ciudad de Mexico. Calcula SIEMPRE las fechas a partir de hoy; nunca "
+        "las inventes ni uses otro anio.\n"
+        "</contexto_temporal>"
+    )
+
+
 def _bloques_system(system_prompt: str, state: AgentState) -> list[dict[str, Any]]:
     bloques: list[dict[str, Any]] = [
         {
@@ -46,7 +77,7 @@ def _bloques_system(system_prompt: str, state: AgentState) -> list[dict[str, Any
             "cache_control": {"type": "ephemeral"},
         }
     ]
-    dinamico: list[str] = []
+    dinamico: list[str] = [_contexto_temporal()]
     if state.get("perfil"):
         perfil_json = json.dumps(state["perfil"], ensure_ascii=False)
         dinamico.append(f"<perfil_cliente>\n{perfil_json}\n</perfil_cliente>")

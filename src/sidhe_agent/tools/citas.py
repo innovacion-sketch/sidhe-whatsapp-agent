@@ -72,13 +72,28 @@ async def _consultar_disponibilidad(
         inicio = datetime.date.fromisoformat(fecha_inicio)
         fin = datetime.date.fromisoformat(fecha_fin)
     except ValueError:
-        return {"error": "fechas_invalidas", "formato_esperado": "YYYY-MM-DD"}
+        return {
+            "error": "fechas_invalidas",
+            "formato_esperado": "YYYY-MM-DD",
+            "fecha_de_hoy": _ahora().date().isoformat(),
+        }
 
     ahora = _ahora()
+    if fin < ahora.date():
+        # Rango ya pasado (el modelo suele errar el anio): devolver la fecha
+        # real para que se corrija en el siguiente intento, no un error mudo.
+        return {
+            "error": "rango_en_el_pasado",
+            "fecha_de_hoy": ahora.date().isoformat(),
+            "sugerencia": "vuelve a llamar con fechas desde hoy en adelante",
+        }
     inicio = max(inicio, ahora.date())
     fin = min(fin, inicio + datetime.timedelta(days=VENTANA_MAX_DIAS - 1))
     if fin < inicio:
-        return {"error": "rango_invalido"}
+        return {
+            "error": "rango_invalido",
+            "fecha_de_hoy": ahora.date().isoformat(),
+        }
 
     condiciones = (
         Slot.sucursal_id == sucursal_id,
