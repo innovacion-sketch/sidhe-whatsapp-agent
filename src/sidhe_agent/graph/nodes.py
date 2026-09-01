@@ -11,7 +11,7 @@ import json
 from typing import Any, Awaitable, Callable
 
 import structlog
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import Runnable
 from langgraph.store.base import BaseStore
 from langgraph.types import interrupt
@@ -59,12 +59,41 @@ def _bloques_system(system_prompt: str, state: AgentState) -> list[dict[str, Any
     return bloques
 
 
+def _log_resultados_de_tools(mensajes: list) -> None:
+    """Registra el resultado de las tools del paso previo.
+
+    Sin esto, un fallo de tool solo se ve como llamadas repetidas al modelo:
+    no queda rastro de que devolvio la tool ni con que argumentos se llamo.
+    """
+    for mensaje in reversed(mensajes):
+        if not isinstance(mensaje, ToolMessage):
+            break
+        contenido = (
+            mensaje.content
+            if isinstance(mensaje.content, str)
+            else str(mensaje.content)
+        )
+        logger.info(
+            "tool_resultado",
+            tool=mensaje.name,
+            status=getattr(mensaje, "status", None),
+            resultado=contenido[:400],
+        )
+
+
 def make_agente(
     llm_con_tools: Runnable, system_prompt: str
 ) -> Callable[[AgentState], Awaitable[dict[str, Any]]]:
     async def agente(state: AgentState) -> dict[str, Any]:
+        _log_resultados_de_tools(state["messages"])
         system = SystemMessage(content=_bloques_system(system_prompt, state))
         respuesta = await llm_con_tools.ainvoke([system, *state["messages"]])
+        for llamada in getattr(respuesta, "tool_calls", []) or []:
+            logger.info(
+                "tool_solicitada",
+                tool=llamada.get("name"),
+                args=llamada.get("args"),
+            )
         return {"messages": [respuesta]}
 
     return agente
