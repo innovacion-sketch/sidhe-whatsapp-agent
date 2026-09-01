@@ -108,6 +108,8 @@ async def health() -> dict[str, str]:
         async with get_engine().connect() as conn:
             await conn.execute(text("SELECT 1"))
     except Exception as exc:
+        # Sin esto, un 503 no dice por qué falló la conexión de negocio.
+        logger.exception("health_db_error", error=str(exc))
         raise HTTPException(status_code=503, detail="db_no_disponible") from exc
     return {"status": "ok"}
 

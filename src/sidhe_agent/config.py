@@ -1,8 +1,41 @@
 """Configuración central del servicio vía variables de entorno (pydantic-settings)."""
 
 from functools import lru_cache
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Esquemas que puede traer el DATABASE_URL de un proveedor administrado
+ESQUEMAS_POSTGRES = (
+    "postgresql+asyncpg://",
+    "postgresql+psycopg://",
+    "postgresql://",
+    "postgres://",
+)
+
+# Parámetros de libpq/psycopg que asyncpg rechaza
+PARAMS_INCOMPATIBLES_ASYNCPG = frozenset(
+    {"sslmode", "channel_binding", "target_session_attrs", "options", "gssencmode"}
+)
+
+
+def _normalizar_esquema(url: str, esquema_destino: str) -> str:
+    for esquema in ESQUEMAS_POSTGRES:
+        if url.startswith(esquema):
+            return esquema_destino + url[len(esquema) :]
+    return url
+
+
+def _sin_parametros(url: str, excluidos: frozenset[str]) -> str:
+    partes = urlsplit(url)
+    if not partes.query:
+        return url
+    conservados = [
+        (clave, valor)
+        for clave, valor in parse_qsl(partes.query, keep_blank_values=True)
+        if clave.lower() not in excluidos
+    ]
+    return urlunsplit(partes._replace(query=urlencode(conservados)))
 
 
 class Settings(BaseSettings):
@@ -50,13 +83,20 @@ class Settings(BaseSettings):
 
     @property
     def sqlalchemy_url(self) -> str:
-        """DSN para SQLAlchemy async (tablas de negocio, driver asyncpg)."""
-        return self.database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        """DSN para SQLAlchemy async (tablas de negocio, driver asyncpg).
+
+        Normaliza el DSN que dan los proveedores (Easypanel, Railway, etc.):
+        acepta postgres:// y postgresql://, y descarta los parámetros de
+        consulta que asyncpg no entiende (sslmode y similares son sintaxis de
+        libpq/psycopg, no de asyncpg).
+        """
+        url = _normalizar_esquema(self.database_url, "postgresql+asyncpg://")
+        return _sin_parametros(url, PARAMS_INCOMPATIBLES_ASYNCPG)
 
     @property
     def psycopg_url(self) -> str:
         """DSN para el checkpointer/store de LangGraph (driver psycopg 3)."""
-        return self.database_url
+        return _normalizar_esquema(self.database_url, "postgresql://")
 
 
 @lru_cache
