@@ -37,6 +37,7 @@ SUCURSALES_PRUEBA = [
         "horario_cierre": datetime.time(20, 0),
         "dias_operacion": DIAS_TODOS,
         "telefono": None,
+        "calendar_id": None,
     },
     {
         "nombre": "Liverpool Polanco",
@@ -49,6 +50,7 @@ SUCURSALES_PRUEBA = [
         "horario_cierre": datetime.time(20, 0),
         "dias_operacion": DIAS_TODOS,
         "telefono": None,
+        "calendar_id": None,
     },
     {
         "nombre": "Liverpool Satélite",
@@ -61,6 +63,7 @@ SUCURSALES_PRUEBA = [
         "horario_cierre": datetime.time(20, 0),
         "dias_operacion": DIAS_TODOS,
         "telefono": None,
+        "calendar_id": None,
     },
     {
         "nombre": "Liverpool Galerías Guadalajara",
@@ -73,6 +76,7 @@ SUCURSALES_PRUEBA = [
         "horario_cierre": datetime.time(20, 0),
         "dias_operacion": DIAS_TODOS,
         "telefono": None,
+        "calendar_id": None,
     },
     {
         "nombre": "Liverpool Valle Oriente",
@@ -85,6 +89,7 @@ SUCURSALES_PRUEBA = [
         "horario_cierre": datetime.time(20, 0),
         "dias_operacion": DIAS_TODOS,
         "telefono": None,
+        "calendar_id": None,
     },
 ]
 
@@ -124,6 +129,7 @@ def _desde_csv() -> tuple[list[dict], list[str]]:
                     ]
                     or DIAS_TODOS,
                     "telefono": fila.get("telefono", "").strip() or None,
+                    "calendar_id": fila.get("calendar_id", "").strip() or None,
                 }
             )
     return filas, omitidas

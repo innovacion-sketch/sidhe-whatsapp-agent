@@ -22,6 +22,8 @@ from sqlalchemy.exc import IntegrityError
 from ..config import get_settings
 from ..db.models import Cita, Slot, Sucursal
 from ..db.session import get_session
+from ..services.google_calendar import borrar_evento, crear_evento
+from ..services.n8n import avisar_cita
 
 VENTANA_MAX_DIAS = 14
 MAX_RESULTADOS = 10
@@ -189,7 +191,7 @@ async def _agendar_cita(
             return {"error": "ya_tienes_cita_en_ese_horario"}
 
         sucursal = await session.get(Sucursal, slot.sucursal_id)
-        return {
+        confirmacion = {
             "folio": cita.id,
             "sucursal": sucursal.nombre if sucursal else "",
             "direccion": sucursal.direccion if sucursal else "",
@@ -198,6 +200,24 @@ async def _agendar_cita(
             "hora": slot.hora_inicio.strftime("%H:%M"),
             "nombre_cliente": cita.cliente_nombre,
         }
+
+        # Integraciones externas: la cita ya esta confirmada en la DB, asi que
+        # un fallo aqui no debe afectar al cliente (ambas funciones lo tragan).
+        event_id = await crear_evento(
+            sucursal.calendar_id if sucursal else None,
+            nombre_cliente=cita.cliente_nombre,
+            telefono=telefono,
+            folio=cita.id,
+            fecha=slot.fecha,
+            hora_inicio=slot.hora_inicio,
+            hora_fin=slot.hora_fin,
+            direccion=sucursal.direccion if sucursal else "",
+        )
+        if event_id:
+            cita.google_event_id = event_id
+            await session.commit()
+        await avisar_cita("creada", {**confirmacion, "telefono": telefono})
+        return confirmacion
 
 
 async def _consultar_mis_citas(telefono: str) -> list[dict]:
@@ -248,6 +268,22 @@ async def _cancelar_cita(cita_id: int, telefono: str) -> dict:
         slot.reservados = max(0, slot.reservados - 1)
         cita.estado = "cancelada"
         await session.commit()
+
+        sucursal = await session.get(Sucursal, cita.sucursal_id)
+        await borrar_evento(
+            sucursal.calendar_id if sucursal else None, cita.google_event_id
+        )
+        await avisar_cita(
+            "cancelada",
+            {
+                "folio": cita.id,
+                "sucursal": sucursal.nombre if sucursal else "",
+                "fecha": slot.fecha.isoformat(),
+                "hora": slot.hora_inicio.strftime("%H:%M"),
+                "nombre_cliente": cita.cliente_nombre,
+                "telefono": telefono,
+            },
+        )
         return {"ok": True, "folio": cita.id}
 
 

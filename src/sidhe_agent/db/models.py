@@ -53,6 +53,9 @@ class Sucursal(Base):
     horario_cierre: Mapped[datetime.time] = mapped_column(Time, nullable=False)
     dias_operacion: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
     telefono: Mapped[str | None] = mapped_column(String(20))
+    # Correo del calendario de Google de la sucursal (para Gmail, el
+    # calendar_id ES el correo). Vacio = no se sincroniza esa sucursal.
+    calendar_id: Mapped[str | None] = mapped_column(String(200))
     activa: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 
@@ -83,6 +86,8 @@ class Cita(Base):
     cliente_nombre: Mapped[str] = mapped_column(String(120), nullable=False)
     estado: Mapped[str] = mapped_column(EstadoCita, default="confirmada", nullable=False)
     canal: Mapped[str] = mapped_column(String(30), nullable=False)
+    # Evento espejo en Google Calendar (para poder borrarlo al cancelar)
+    google_event_id: Mapped[str | None] = mapped_column(String(200))
     creada_en: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

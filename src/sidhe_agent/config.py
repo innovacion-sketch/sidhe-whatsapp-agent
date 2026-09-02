@@ -77,6 +77,16 @@ class Settings(BaseSettings):
     # API interna (recordatorios vía n8n)
     internal_api_key: str = ""
 
+    # Google Calendar: JSON de la cuenta de servicio (contenido completo, no
+    # una ruta). Vacío = sincronización desactivada.
+    google_credentials_json: str = ""
+    # Minutos de recordatorio del evento (popup) en el calendario del stand
+    google_calendar_recordatorio_min: int = 60
+
+    # n8n: webhook al que se avisa cada cita creada/cancelada (para Sheets).
+    # Vacío = no se envía nada.
+    n8n_webhook_citas: str = ""
+
     # Sistema
     tz: str = "America/Mexico_City"
     log_level: str = "INFO"

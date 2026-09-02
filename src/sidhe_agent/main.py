@@ -462,3 +462,57 @@ async def resolver_escalamiento(
         "escalamientos_atendidos": len(pendientes),
         "thread_reanudado": reanudado,
     }
+
+
+@app.get("/internal/citas")
+async def listar_citas(
+    desde: str | None = None,
+    hasta: str | None = None,
+    x_api_key: str = Header(default=""),
+) -> dict[str, Any]:
+    """Citas en un rango de fechas (default: hoy a +14 días).
+
+    Pensado para n8n (sincronización a Google Sheets y reportes) y para
+    reconciliar si algún webhook se perdió.
+    """
+    _validar_api_key_interna(x_api_key)
+    tz = ZoneInfo(get_settings().tz)
+    hoy = datetime.datetime.now(tz).date()
+    try:
+        inicio = datetime.date.fromisoformat(desde) if desde else hoy
+        fin = datetime.date.fromisoformat(hasta) if hasta else hoy + datetime.timedelta(days=14)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="fechas_invalidas (usa YYYY-MM-DD)")
+
+    async with get_session() as session:
+        filas = (
+            await session.execute(
+                select(Cita, Slot, Sucursal)
+                .join(Slot, Cita.slot_id == Slot.id)
+                .join(Sucursal, Cita.sucursal_id == Sucursal.id)
+                .where(Slot.fecha >= inicio, Slot.fecha <= fin)
+                .order_by(Slot.fecha, Slot.hora_inicio)
+            )
+        ).all()
+
+    return {
+        "desde": inicio.isoformat(),
+        "hasta": fin.isoformat(),
+        "total": len(filas),
+        "citas": [
+            {
+                "folio": cita.id,
+                "estado": cita.estado,
+                "cliente": cita.cliente_nombre,
+                "telefono": cita.cliente_telefono,
+                "sucursal": sucursal.nombre,
+                "direccion": sucursal.direccion,
+                "fecha": slot.fecha.isoformat(),
+                "fecha_legible": fecha_legible(slot.fecha),
+                "hora": slot.hora_inicio.strftime("%H:%M"),
+                "canal": cita.canal,
+                "creada_en": cita.creada_en.isoformat(),
+            }
+            for cita, slot, sucursal in filas
+        ],
+    }

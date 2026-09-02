@@ -120,6 +120,9 @@ Notas de operación:
 | `VOYAGE_API_KEY` / `COHERE_API_KEY` | Según el proveedor elegido |
 | `INTERNAL_API_KEY` | Protege los endpoints `/internal/*` |
 | `TWILIO_RECORDATORIO_CONTENT_SID` | SID (HX...) del template de recordatorio aprobado |
+| `GOOGLE_CREDENTIALS_JSON` | JSON completo de la cuenta de servicio (vacío = sin calendario) |
+| `GOOGLE_CALENDAR_RECORDATORIO_MIN` | Minutos de aviso en el evento (default 60) |
+| `N8N_WEBHOOK_CITAS` | URL del webhook de n8n para citas (vacío = no se envía) |
 | `TZ` | `America/Mexico_City` |
 | `LOG_LEVEL` | `INFO` por default |
 
@@ -145,6 +148,54 @@ Setup único del template (requiere aprobación de WhatsApp, categoría UTILITY)
 ```bash
 uv run python scripts/setup_recordatorio_template.py
 # imprime el HX... → ponlo en TWILIO_RECORDATORIO_CONTENT_SID
+```
+
+## Citas en Google Calendar y Google Sheets
+
+Cada cita confirmada se refleja automáticamente en el calendario de su
+sucursal y se avisa a n8n (para la hoja de cálculo). La agenda real vive en
+Postgres: **si Google o n8n fallan, la cita NO se pierde ni se bloquea** —
+solo se registra el error.
+
+### Google Calendar (una sola vez)
+
+1. En [Google Cloud Console](https://console.cloud.google.com): crea un
+   proyecto, habilita **Google Calendar API** y crea una **cuenta de
+   servicio**. Genera una llave JSON y copia el correo de la cuenta
+   (`algo@proyecto.iam.gserviceaccount.com`).
+2. Pega el **contenido completo** del JSON en la variable de entorno
+   `GOOGLE_CREDENTIALS_JSON` (no una ruta: el JSON entero).
+3. En **cada** cuenta de Gmail de sucursal: Configuración del calendario →
+   *Compartir con determinadas personas* → agrega ese correo con permiso
+   **"Hacer cambios en los eventos"**.
+4. Pon el correo del calendario de cada sucursal en la columna `calendar_id`
+   de `data/sucursales.csv` (para Gmail el `calendar_id` **es** el correo) y
+   corre `python scripts/seed_sucursales.py` (es upsert).
+
+Las sucursales sin `calendar_id` simplemente no se sincronizan.
+
+El evento incluye nombre del cliente, teléfono, folio, dirección del stand y
+un recordatorio popup (`GOOGLE_CALENDAR_RECORDATORIO_MIN`, default 60 min).
+Al cancelar por WhatsApp, el evento se borra del calendario.
+
+### Google Sheets vía n8n
+
+Push en tiempo real: define `N8N_WEBHOOK_CITAS` con la URL del webhook y el
+bot enviará en cada alta/baja:
+
+```json
+{"evento": "creada", "cita": {"folio": 1, "cliente": "...", "telefono": "...",
+ "sucursal": "...", "fecha": "2026-09-02", "hora": "11:00", ...}}
+```
+
+Incluye el header `X-API-Key` con `INTERNAL_API_KEY` para que n8n valide el
+origen. En n8n: nodo **Webhook** → **Google Sheets (Append)**.
+
+Para reportes o para reconciliar si un webhook se perdió:
+
+```
+GET /internal/citas?desde=2026-09-01&hasta=2026-09-15
+Header: X-API-Key: <INTERNAL_API_KEY>
 ```
 
 ## Escalamiento a humano

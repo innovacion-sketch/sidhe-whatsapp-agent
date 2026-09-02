@@ -25,6 +25,9 @@ dependencies = [
     "groq>=1.5.0",
     "openai>=2.45.0",
     "httpx>=0.28.1",
+    # Google Calendar (espejo de citas por sucursal)
+    "google-api-python-client>=2.100.0",
+    "google-auth>=2.30.0",
     # Config / logging
     "pydantic>=2.13.4",
     "pydantic-settings>=2.14.2",
