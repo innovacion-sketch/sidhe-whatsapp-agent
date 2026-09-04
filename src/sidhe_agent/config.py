@@ -1,5 +1,6 @@
 """Configuración central del servicio vía variables de entorno (pydantic-settings)."""
 
+import base64
 from functools import lru_cache
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -77,8 +78,9 @@ class Settings(BaseSettings):
     # API interna (recordatorios vía n8n)
     internal_api_key: str = ""
 
-    # Google Calendar: JSON de la cuenta de servicio (contenido completo, no
-    # una ruta). Vacío = sincronización desactivada.
+    # Google Calendar: credenciales de la cuenta de servicio. Acepta el JSON
+    # en una sola línea O el mismo JSON en base64 (ver `google_credentials`).
+    # Vacío = sincronización desactivada.
     google_credentials_json: str = ""
     # Minutos de recordatorio del evento (popup) en el calendario del stand
     google_calendar_recordatorio_min: int = 60
@@ -90,6 +92,22 @@ class Settings(BaseSettings):
     # Sistema
     tz: str = "America/Mexico_City"
     log_level: str = "INFO"
+
+    @property
+    def google_credentials(self) -> str:
+        """JSON de la cuenta de servicio, venga como JSON o como base64.
+
+        Los paneles de despliegue guardan cada variable en un solo renglón y
+        rompen un JSON multilínea; base64 evita comillas, llaves y saltos de
+        línea sin necesidad de otra variable.
+        """
+        valor = self.google_credentials_json.strip()
+        if not valor or valor.startswith("{"):
+            return valor
+        try:
+            return base64.b64decode(valor, validate=True).decode("utf-8")
+        except Exception:
+            return valor
 
     @property
     def sqlalchemy_url(self) -> str:

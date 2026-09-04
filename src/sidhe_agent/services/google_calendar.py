@@ -25,14 +25,14 @@ DURACION_DEFAULT_MIN = 60
 
 
 def sincronizacion_activa() -> bool:
-    return bool(get_settings().google_credentials_json.strip())
+    return bool(get_settings().google_credentials)
 
 
 def _servicio() -> Any:
     from google.oauth2 import service_account
     from googleapiclient.discovery import build
 
-    info = json.loads(get_settings().google_credentials_json)
+    info = json.loads(get_settings().google_credentials)
     credenciales = service_account.Credentials.from_service_account_info(
         info, scopes=ALCANCES
     )
