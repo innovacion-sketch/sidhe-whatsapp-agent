@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Panel Sidhe</title>
+<style>
+  :root {
+    --fondo: #0f1115; --tarjeta: #181b22; --borde: #262b36;
+    --texto: #e6e9ef; --suave: #9aa3b2; --azul: #3b82f6; --rojo: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--fondo); color: var(--texto);
+         font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+           justify-content: space-between; padding: 20px 24px;
+           border-bottom: 1px solid var(--borde); }
+  h1 { font-size: 20px; margin: 0; }
+  select, button, input {
+    background: var(--tarjeta); color: var(--texto);
+    border: 1px solid var(--borde); border-radius: 8px; padding: 8px 12px;
+    font-size: 14px; }
+  button { cursor: pointer; }
+  main { padding: 24px; display: grid; gap: 16px; }
+  .tarjetas { display: grid; gap: 16px;
+              grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+  .tarjeta { background: var(--tarjeta); border: 1px solid var(--borde);
+             border-radius: 12px; padding: 16px; }
+  .rotulo { color: var(--suave); font-size: 11px; letter-spacing: .08em;
+            text-transform: uppercase; }
+  .cifra { font-size: 30px; font-weight: 700; margin-top: 6px; }
+  .nota { color: var(--suave); font-size: 12px; margin-top: 2px; }
+  .paneles { display: grid; gap: 16px; grid-template-columns: 2fr 1fr; }
+  @media (max-width: 900px) { .paneles { grid-template-columns: 1fr; } }
+  h2 { font-size: 14px; margin: 0 0 12px; color: var(--suave); font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; color: var(--suave); font-size: 11px;
+       text-transform: uppercase; letter-spacing: .06em;
+       padding: 6px 8px; border-bottom: 1px solid var(--borde); }
+  td { padding: 8px; border-bottom: 1px solid var(--borde); }
+  tr:last-child td { border-bottom: none; }
+  .barra { height: 8px; background: var(--azul); border-radius: 4px; }
+  .aviso { background: var(--tarjeta); border: 1px solid var(--borde);
+           border-radius: 12px; padding: 24px; max-width: 460px; margin: 60px auto; }
+  .aviso p { color: var(--suave); }
+  .error { color: var(--rojo); }
+  svg { width: 100%; height: 180px; display: block; }
+</style>
+</head>
+<body>
+<div id="login" class="aviso" hidden>
+  <h1>Panel Sidhe</h1>
+  <p>Escribe la clave interna del servicio para ver las metricas.</p>
+  <input id="clave" type="password" placeholder="INTERNAL_API_KEY" style="width:100%">
+  <p class="error" id="errorLogin" hidden>Clave incorrecta.</p>
+  <button id="entrar" style="margin-top:8px">Entrar</button>
+</div>
+
+<div id="app" hidden>
+<header>
+  <h1>Panel Sidhe</h1>
+  <div>
+    <select id="dias">
+      <option value="7">Ultimos 7 dias</option>
+      <option value="30" selected>Ultimos 30 dias</option>
+      <option value="90">Ultimos 90 dias</option>
+    </select>
+    <button id="salir">Salir</button>
+  </div>
+</header>
+
+<main>
+  <section class="tarjetas" id="tarjetas"></section>
+
+  <section class="paneles">
+    <div class="tarjeta">
+      <h2>Mensajes por dia</h2>
+      <svg id="serie" viewBox="0 0 600 180" preserveAspectRatio="none"></svg>
+    </div>
+    <div class="tarjeta">
+      <h2>Por canal</h2>
+      <table id="canales"></table>
+    </div>
+  </section>
+
+  <section class="paneles">
+    <div class="tarjeta">
+      <h2>Proximas citas</h2>
+      <table id="proximas"></table>
+    </div>
+    <div class="tarjeta">
+      <h2>Citas por sucursal</h2>
+      <table id="sucursales"></table>
+    </div>
+  </section>
+</main>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const clave = () => localStorage.getItem("sidhe_api_key") || "";
+
+function mostrarLogin(conError) {
+  $("login").hidden = false;
+  $("app").hidden = true;
+  $("errorLogin").hidden = !conError;
+}
+
+async function cargar() {
+  const dias = $("dias").value;
+  const r = await fetch("/internal/metricas?dias=" + dias, {
+    headers: { "X-API-Key": clave() },
+  });
+  if (r.status === 401) {
+    localStorage.removeItem("sidhe_api_key");
+    mostrarLogin(true);
+    return;
+  }
+  if (!r.ok) { alert("Error cargando metricas: " + r.status); return; }
+  pintar(await r.json());
+}
+
+function tarjeta(rotulo, cifra, nota) {
+  return '<div class="tarjeta"><div class="rotulo">' + rotulo +
+         '</div><div class="cifra">' + cifra +
+         '</div><div class="nota">' + (nota || "") + '</div></div>';
+}
+
+function duracion(seg) {
+  if (seg === null || seg === undefined) return "sin datos";
+  if (seg < 60) return seg.toFixed(0) + " s";
+  return (seg / 60).toFixed(1) + " min";
+}
+
+function filas(datos, columnas, vacio) {
+  if (!datos.length) {
+    return '<tr><td colspan="' + columnas + '">' + vacio + "</td></tr>";
+  }
+  return datos.join("");
+}
+
+function pintar(d) {
+  $("tarjetas").innerHTML = [
+    tarjeta("Clientes atendidos", d.resumen.clientes, d.dias + " dias"),
+    tarjeta("Mensajes", d.resumen.mensajes,
+            d.resumen.entrantes + " entrantes / " + d.resumen.salientes + " salientes"),
+    tarjeta("Citas agendadas", d.citas.total, d.conversion + "% de conversion"),
+    tarjeta("En calendario", d.citas.en_calendario, "eventos sincronizados"),
+    tarjeta("Escalamientos", d.escalamientos.total,
+            d.escalamientos.pendientes + " pendientes"),
+    tarjeta("1a respuesta", duracion(d.primera_respuesta_seg), "promedio"),
+    tarjeta("Notas de voz", d.resumen.notas_de_voz, "transcritas"),
+    tarjeta("Toques de boton", d.resumen.toques_de_boton, "selecciones"),
+  ].join("");
+
+  dibujarSerie(d.serie_diaria);
+
+  $("canales").innerHTML =
+    "<tr><th>Canal</th><th>Clientes</th><th>Mensajes</th></tr>" +
+    filas(d.por_canal.map(function (c) {
+      return "<tr><td>" + c.canal + "</td><td>" + c.clientes +
+             "</td><td>" + c.mensajes + "</td></tr>";
+    }), 3, "Sin datos");
+
+  $("proximas").innerHTML =
+    "<tr><th>Folio</th><th>Cliente</th><th>Sucursal</th><th>Fecha</th><th>Hora</th></tr>" +
+    filas(d.proximas_citas.map(function (c) {
+      return "<tr><td>" + c.folio + "</td><td>" + c.cliente + "</td><td>" +
+             c.sucursal + "</td><td>" + c.fecha + "</td><td>" + c.hora + "</td></tr>";
+    }), 5, "Sin citas proximas");
+
+  const max = Math.max.apply(null, [1].concat(d.top_sucursales.map(function (s) {
+    return s.citas;
+  })));
+  $("sucursales").innerHTML =
+    "<tr><th>Sucursal</th><th>Citas</th><th></th></tr>" +
+    filas(d.top_sucursales.map(function (s) {
+      return "<tr><td>" + s.sucursal + "</td><td>" + s.citas +
+             '</td><td><div class="barra" style="width:' +
+             (100 * s.citas / max) + '%"></div></td></tr>';
+    }), 3, "Sin citas");
+}
+
+function dibujarSerie(serie) {
+  const svg = $("serie");
+  if (!serie.length) {
+    svg.innerHTML = '<text x="10" y="90" fill="#9aa3b2">Sin datos en el periodo</text>';
+    return;
+  }
+  const max = Math.max.apply(null, [1].concat(serie.map(function (p) {
+    return p.mensajes;
+  })));
+  const paso = serie.length > 1 ? 600 / (serie.length - 1) : 600;
+  const puntos = serie.map(function (p, i) {
+    return (i * paso).toFixed(1) + "," + (170 - (p.mensajes / max) * 150).toFixed(1);
+  }).join(" ");
+  svg.innerHTML =
+    '<polygon fill="rgba(59,130,246,.15)" points="0,180 ' + puntos + ' 600,180"/>' +
+    '<polyline fill="none" stroke="#3b82f6" stroke-width="2" points="' + puntos + '"/>' +
+    '<text x="4" y="14" fill="#9aa3b2" font-size="11">max ' + max + '</text>';
+}
+
+$("entrar").onclick = async function () {
+  localStorage.setItem("sidhe_api_key", $("clave").value.trim());
+  const r = await fetch("/internal/metricas?dias=7", {
+    headers: { "X-API-Key": clave() },
+  });
+  if (r.ok) {
+    $("login").hidden = true;
+    $("app").hidden = false;
+    cargar();
+  } else {
+    localStorage.removeItem("sidhe_api_key");
+    mostrarLogin(true);
+  }
+};
+$("clave").onkeydown = function (e) { if (e.key === "Enter") $("entrar").click(); };
+$("salir").onclick = function () {
+  localStorage.removeItem("sidhe_api_key");
+  mostrarLogin(false);
+};
+$("dias").onchange = cargar;
+
+if (clave()) { $("app").hidden = false; cargar(); } else { mostrarLogin(false); }
+</script>
+</body>
+</html>

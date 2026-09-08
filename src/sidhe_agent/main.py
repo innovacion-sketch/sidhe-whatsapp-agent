@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 
 import structlog
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request, Response
+from fastapi.responses import HTMLResponse
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
@@ -31,6 +32,7 @@ from .db.session import dispose_engine, get_engine, get_session
 from .graph.builder import build_graph
 from .memory.long_term import crear_extractor
 from .observability import configurar_logging, enmascarar_user_id
+from .services import metricas
 from .services.transcription import transcribir_audio
 from .services.twilio_content import enviar_recordatorio
 from .tools.citas import fecha_legible
@@ -38,6 +40,8 @@ from .tools.citas import fecha_legible
 logger = structlog.get_logger(__name__)
 
 RUTA_SYSTEM_PROMPT = Path(__file__).parent / "graph" / "prompts" / "system.md"
+RUTA_PANEL = Path(__file__).parent / "panel" / "index.html"
+MAX_DIAS_PANEL = 365
 LIMITE_PASOS_GRAFO = 30
 NOTA_ESCALAMIENTO_RESUELTO = (
     "[nota del sistema] Un asesor humano ya atendió el escalamiento anterior "
@@ -516,3 +520,23 @@ async def listar_citas(
             for cita, slot, sucursal in filas
         ],
     }
+
+
+@app.get("/internal/metricas")
+async def obtener_metricas(
+    dias: int = 30, x_api_key: str = Header(default="")
+) -> dict[str, Any]:
+    """Métricas del panel: conversaciones, citas, canales y escalamientos."""
+    _validar_api_key_interna(x_api_key)
+    if not 1 <= dias <= MAX_DIAS_PANEL:
+        raise HTTPException(status_code=400, detail="dias fuera de rango (1-365)")
+    return await metricas.calcular(dias)
+
+
+@app.get("/panel", response_class=HTMLResponse)
+async def panel() -> HTMLResponse:
+    """Página del panel. No trae datos: los pide a /internal/metricas con la
+    clave que el usuario escribe, así la página puede servirse sin secretos."""
+    if not RUTA_PANEL.exists():
+        raise HTTPException(status_code=404, detail="panel no encontrado")
+    return HTMLResponse(RUTA_PANEL.read_text(encoding="utf-8"))

@@ -69,8 +69,9 @@ por texto ANTES de confirmar. Luego muestra un resumen (sucursal, fecha, \
 hora, nombre) y pide confirmación con presentar_opciones tipo "botones": \
 "Confirmar ✅" (id "confirmar"), "Cambiar" (id "cambiar"), "Cancelar" (id \
 "cancelar").
-6. SOLO tras el toque en "confirmar" llama agendar_cita. Confirma con folio, \
-sucursal, dirección, fecha y hora, y recomienda llegar 10 minutos antes.
+6. SOLO tras el toque en "confirmar" llama agendar_cita. Confirma con \
+folio, sucursal, direccion, fecha y hora; recomienda llegar 10 minutos antes \
+y llevar ropa comoda para el estudio de pisada.
 
 Reglas del flujo:
 - Nunca llames la misma tool dos veces con los mismos argumentos. Si una \

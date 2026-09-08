@@ -198,6 +198,29 @@ GET /internal/citas?desde=2026-09-01&hasta=2026-09-15
 Header: X-API-Key: <INTERNAL_API_KEY>
 ```
 
+## Panel de métricas
+
+`GET /panel` sirve un tablero con lo que va pasando en las conversaciones:
+clientes atendidos, mensajes (entrantes/salientes), citas agendadas y su tasa
+de conversión, eventos sincronizados al calendario, escalamientos pendientes,
+tiempo promedio de primera respuesta, notas de voz, toques de botón, serie
+diaria de mensajes, desglose por canal, próximas citas y citas por sucursal.
+
+La página no contiene secretos: pide la `INTERNAL_API_KEY` al entrar, la
+guarda en el navegador y con ella consulta `GET /internal/metricas?dias=30`
+(mismo header `X-API-Key` que el resto de `/internal/*`).
+
+Todo se calcula sobre las tablas de auditoría (`mensajes`, `citas`,
+`escalamientos`), y el canal es una columna: **cuando el adaptador de Chatwoot
+empiece a escribir con canal `facebook` o `instagram`, aparecen solos en el
+panel** — no hay nada que cambiar en las métricas.
+
+Para revisar el diseño sin base de datos (métricas de ejemplo):
+
+```bash
+uv run python scripts/demo_panel.py   # http://localhost:8123/panel
+```
+
 ## Escalamiento a humano
 
 Cuando el agente escala (el cliente lo pide, queja de garantía, tema médico
