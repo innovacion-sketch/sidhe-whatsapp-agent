@@ -68,5 +68,59 @@ async def met(dias: int = 30) -> dict:
     return {**EJEMPLO, "dias": dias}
 
 
+CONVERSACIONES = [
+    {"canal": "whatsapp", "user_id": "+5215642934582",
+     "ultimo_mensaje": "Confirmar", "ultima_direccion": "in",
+     "ultima_fecha": "2026-09-04T17:42:00", "mensajes": 18, "bot_pausado": False},
+    {"canal": "whatsapp", "user_id": "+5215512232247",
+     "ultimo_mensaje": "Un asesor te contactara en breve",
+     "ultima_direccion": "out", "ultima_fecha": "2026-09-04T16:10:00",
+     "mensajes": 9, "bot_pausado": True},
+    {"canal": "instagram", "user_id": "ig:andres.bautista",
+     "ultimo_mensaje": "Informacion para comprar plantillas",
+     "ultima_direccion": "in", "ultima_fecha": "2026-09-04T12:03:00",
+     "mensajes": 4, "bot_pausado": False},
+]
+
+HISTORIAL = {
+    "canal": "whatsapp", "user_id": "+5215642934582",
+    "bot_pausado": False, "ventana_abierta": True,
+    "mensajes": [
+        {"direccion": "in", "tipo": "texto", "contenido": "Hola",
+         "fecha": "2026-09-04T17:30:00"},
+        {"direccion": "out", "tipo": "texto",
+         "contenido": "Hola! Bienvenido a Sidhe Group. En que te ayudo?",
+         "fecha": "2026-09-04T17:30:12"},
+        {"direccion": "in", "tipo": "audio",
+         "contenido": "[transcripcion] cuanto cuestan las plantillas",
+         "fecha": "2026-09-04T17:31:00"},
+        {"direccion": "out", "tipo": "texto",
+         "contenido": "Estandar 2199, deportiva 2499, express 2899 y sandalias 3799.",
+         "fecha": "2026-09-04T17:31:20"},
+        {"direccion": "in", "tipo": "seleccion_interactiva",
+         "contenido": "Confirmar", "fecha": "2026-09-04T17:42:00"},
+        {"direccion": "out", "tipo": "humano",
+         "contenido": "Te esperamos manana, cualquier duda aqui estoy.",
+         "fecha": "2026-09-04T17:45:00"},
+    ],
+}
+
+
+@app.get("/internal/conversaciones")
+async def conversaciones(buscar: str = "", limite: int = 50) -> dict:
+    datos = [c for c in CONVERSACIONES if buscar.lower() in c["user_id"].lower()]
+    return {"conversaciones": datos}
+
+
+@app.get("/internal/conversaciones/{canal}/{user_id}")
+async def conversacion(canal: str, user_id: str) -> dict:
+    return {**HISTORIAL, "canal": canal, "user_id": user_id}
+
+
+@app.post("/internal/conversaciones/{canal}/{user_id}/responder")
+async def responder(canal: str, user_id: str) -> dict:
+    return {"ok": True, "bot_pausado": True}
+
+
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8123)

@@ -32,7 +32,7 @@ from .db.session import dispose_engine, get_engine, get_session
 from .graph.builder import build_graph
 from .memory.long_term import crear_extractor
 from .observability import configurar_logging, enmascarar_user_id
-from .services import metricas
+from .services import conversaciones, metricas
 from .services.transcription import transcribir_audio
 from .services.twilio_content import enviar_recordatorio
 from .tools.citas import fecha_legible
@@ -218,6 +218,10 @@ async def procesar_mensaje(app: FastAPI, entrante: IncomingMessage) -> None:
         snapshot = await app.state.graph.aget_state(config)
         if any(t.interrupts for t in snapshot.tasks):
             log.info("thread_escalado_bot_en_silencio")
+            return
+        if await conversaciones.bot_pausado(entrante.canal, entrante.user_id):
+            # Un humano tomo la conversacion desde el panel: el bot no opina.
+            log.info("conversacion_atendida_por_humano")
             return
 
         transcripcion = None
@@ -540,3 +544,76 @@ async def panel() -> HTMLResponse:
     if not RUTA_PANEL.exists():
         raise HTTPException(status_code=404, detail="panel no encontrado")
     return HTMLResponse(RUTA_PANEL.read_text(encoding="utf-8"))
+
+
+class RespuestaHumana(BaseModel):
+    texto: str
+
+
+@app.get("/internal/conversaciones")
+async def listar_conversaciones(
+    buscar: str = "", limite: int = 50, x_api_key: str = Header(default="")
+) -> dict[str, Any]:
+    """Bandeja: conversaciones ordenadas por actividad reciente."""
+    _validar_api_key_interna(x_api_key)
+    return {"conversaciones": await conversaciones.listar(buscar, limite)}
+
+
+@app.get("/internal/conversaciones/{canal}/{user_id}")
+async def ver_conversacion(
+    canal: str, user_id: str, x_api_key: str = Header(default="")
+) -> dict[str, Any]:
+    """Historial completo de una conversación."""
+    _validar_api_key_interna(x_api_key)
+    return await conversaciones.historial(canal, user_id)
+
+
+@app.post("/internal/conversaciones/{canal}/{user_id}/responder")
+async def responder_conversacion(
+    canal: str,
+    user_id: str,
+    datos: RespuestaHumana,
+    x_api_key: str = Header(default=""),
+) -> dict[str, Any]:
+    """Envía un mensaje escrito por una persona y silencia al bot.
+
+    Silenciar es parte de responder: si el bot siguiera activo, contestaría
+    también al próximo mensaje del cliente y se pisarían.
+    """
+    _validar_api_key_interna(x_api_key)
+    texto = datos.texto.strip()
+    if not texto:
+        raise HTTPException(status_code=400, detail="texto vacío")
+    if canal != app.state.adapter.canal:
+        raise HTTPException(
+            status_code=400,
+            detail=f"el canal '{canal}' aún no tiene adaptador de envío",
+        )
+
+    pausado_ahora = await conversaciones.tomar_control(canal, user_id)
+    try:
+        sid = await app.state.adapter.send(user_id, OutgoingMessage(texto=texto))
+    except Exception as exc:
+        logger.exception("error_enviando_respuesta_humana")
+        raise HTTPException(
+            status_code=502,
+            detail="no se pudo enviar (¿venció la ventana de 24h de WhatsApp?)",
+        ) from exc
+
+    await _guardar_mensaje("out", canal, user_id, "humano", texto, twilio_sid=sid)
+    logger.info(
+        "respuesta_humana_enviada",
+        user_id=enmascarar_user_id(user_id),
+        bot_pausado_ahora=pausado_ahora,
+    )
+    return {"ok": True, "twilio_sid": sid, "bot_pausado": True}
+
+
+@app.post("/internal/conversaciones/{canal}/{user_id}/devolver-al-bot")
+async def devolver_al_bot(
+    canal: str, user_id: str, x_api_key: str = Header(default="")
+) -> dict[str, Any]:
+    """Cierra los escalamientos pendientes y reactiva al bot."""
+    return await resolver_escalamiento(
+        ResolverEscalamiento(user_id=user_id, canal=canal), x_api_key
+    )

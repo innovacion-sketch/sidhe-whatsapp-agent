@@ -8,19 +8,30 @@
   :root {
     --fondo: #0f1115; --tarjeta: #181b22; --borde: #262b36;
     --texto: #e6e9ef; --suave: #9aa3b2; --azul: #3b82f6; --rojo: #ef4444;
+    --verde: #22c55e; --ambar: #f59e0b;
   }
   * { box-sizing: border-box; }
+  /* display:grid en main y .bandeja gana sobre el atributo hidden */
+  [hidden] { display: none !important; }
   body { margin: 0; background: var(--fondo); color: var(--texto);
          font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
   header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
-           justify-content: space-between; padding: 20px 24px;
+           justify-content: space-between; padding: 16px 24px;
            border-bottom: 1px solid var(--borde); }
   h1 { font-size: 20px; margin: 0; }
-  select, button, input {
-    background: var(--tarjeta); color: var(--texto);
+  select, button, input, textarea {
+    background: var(--tarjeta); color: var(--texto); font-family: inherit;
     border: 1px solid var(--borde); border-radius: 8px; padding: 8px 12px;
     font-size: 14px; }
   button { cursor: pointer; }
+  button.primario { background: var(--azul); border-color: var(--azul);
+                    color: #fff; font-weight: 600; }
+  button.primario:disabled { opacity: .5; cursor: not-allowed; }
+  nav { display: flex; gap: 8px; padding: 0 24px; border-bottom: 1px solid var(--borde); }
+  nav button { background: none; border: none; border-bottom: 2px solid transparent;
+               border-radius: 0; padding: 12px 4px; margin-right: 16px;
+               color: var(--suave); font-size: 14px; }
+  nav button.activo { color: var(--texto); border-bottom-color: var(--azul); }
   main { padding: 24px; display: grid; gap: 16px; }
   .tarjetas { display: grid; gap: 16px;
               grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
@@ -45,15 +56,52 @@
   .aviso p { color: var(--suave); }
   .error { color: var(--rojo); }
   svg { width: 100%; height: 180px; display: block; }
+
+  /* Bandeja */
+  .bandeja { display: grid; grid-template-columns: 330px 1fr; gap: 16px;
+             height: calc(100vh - 190px); min-height: 460px; }
+  @media (max-width: 900px) { .bandeja { grid-template-columns: 1fr;
+                                         height: auto; } }
+  .lista { background: var(--tarjeta); border: 1px solid var(--borde);
+           border-radius: 12px; overflow-y: auto; }
+  .chat { background: var(--tarjeta); border: 1px solid var(--borde);
+          border-radius: 12px; display: flex; flex-direction: column; }
+  .item { padding: 12px 14px; border-bottom: 1px solid var(--borde);
+          cursor: pointer; }
+  .item:hover { background: #1e222b; }
+  .item.sel { background: #1e2a3d; }
+  .item .quien { display: flex; justify-content: space-between; gap: 8px;
+                 font-weight: 600; }
+  .item .previo { color: var(--suave); font-size: 12px; margin-top: 2px;
+                  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .etiqueta { font-size: 10px; padding: 1px 6px; border-radius: 999px;
+              text-transform: uppercase; letter-spacing: .04em; }
+  .et-canal { background: #24304a; color: #9dc0ff; }
+  .et-humano { background: #3a2a12; color: var(--ambar); }
+  .cabecera-chat { padding: 14px; border-bottom: 1px solid var(--borde);
+                   display: flex; justify-content: space-between;
+                   align-items: center; gap: 12px; flex-wrap: wrap; }
+  .mensajes { flex: 1; overflow-y: auto; padding: 16px; display: flex;
+              flex-direction: column; gap: 8px; }
+  .burbuja { max-width: 72%; padding: 8px 12px; border-radius: 12px;
+             white-space: pre-wrap; word-break: break-word; }
+  .entrante { align-self: flex-start; background: #232833; }
+  .saliente { align-self: flex-end; background: #1d3a63; }
+  .saliente.humano { background: #3a3212; }
+  .meta { font-size: 10px; color: var(--suave); margin-top: 4px; }
+  .redactar { border-top: 1px solid var(--borde); padding: 12px;
+              display: flex; gap: 8px; align-items: flex-end; }
+  .redactar textarea { flex: 1; resize: vertical; min-height: 42px; }
+  .vacio { color: var(--suave); text-align: center; padding: 60px 20px; }
 </style>
 </head>
 <body>
 <div id="login" class="aviso" hidden>
   <h1>Panel Sidhe</h1>
-  <p>Escribe la clave interna del servicio para ver las metricas.</p>
+  <p>Escribe la clave interna del servicio para entrar.</p>
   <input id="clave" type="password" placeholder="INTERNAL_API_KEY" style="width:100%">
   <p class="error" id="errorLogin" hidden>Clave incorrecta.</p>
-  <button id="entrar" style="margin-top:8px">Entrar</button>
+  <button id="entrar" class="primario" style="margin-top:8px">Entrar</button>
 </div>
 
 <div id="app" hidden>
@@ -69,9 +117,13 @@
   </div>
 </header>
 
-<main>
-  <section class="tarjetas" id="tarjetas"></section>
+<nav>
+  <button id="tabMetricas" class="activo">Metricas</button>
+  <button id="tabBandeja">Conversaciones</button>
+</nav>
 
+<main id="vistaMetricas">
+  <section class="tarjetas" id="tarjetas"></section>
   <section class="paneles">
     <div class="tarjeta">
       <h2>Mensajes por dia</h2>
@@ -82,7 +134,6 @@
       <table id="canales"></table>
     </div>
   </section>
-
   <section class="paneles">
     <div class="tarjeta">
       <h2>Proximas citas</h2>
@@ -94,11 +145,49 @@
     </div>
   </section>
 </main>
+
+<main id="vistaBandeja" hidden>
+  <div style="display:flex; gap:8px">
+    <input id="buscar" placeholder="Buscar por telefono..." style="flex:1">
+    <button id="refrescar">Refrescar</button>
+  </div>
+  <div class="bandeja">
+    <div class="lista" id="lista"></div>
+    <div class="chat">
+      <div class="cabecera-chat" id="cabeceraChat">
+        <div class="vacio" style="padding:0">Elige una conversacion</div>
+      </div>
+      <div class="mensajes" id="mensajes"></div>
+      <div class="redactar" id="redactar" hidden>
+        <textarea id="texto" placeholder="Escribe tu respuesta..."></textarea>
+        <button id="enviar" class="primario">Enviar</button>
+      </div>
+    </div>
+  </div>
+</main>
 </div>
 
 <script>
 const $ = (id) => document.getElementById(id);
 const clave = () => localStorage.getItem("sidhe_api_key") || "";
+let actual = null;
+
+function esc(t) {
+  return String(t === null || t === undefined ? "" : t)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+async function api(ruta, opciones) {
+  const cfg = opciones || {};
+  cfg.headers = Object.assign({ "X-API-Key": clave() }, cfg.headers || {});
+  const r = await fetch(ruta, cfg);
+  if (r.status === 401) {
+    localStorage.removeItem("sidhe_api_key");
+    mostrarLogin(true);
+    throw new Error("401");
+  }
+  return r;
+}
 
 function mostrarLogin(conError) {
   $("login").hidden = false;
@@ -106,24 +195,18 @@ function mostrarLogin(conError) {
   $("errorLogin").hidden = !conError;
 }
 
-async function cargar() {
-  const dias = $("dias").value;
-  const r = await fetch("/internal/metricas?dias=" + dias, {
-    headers: { "X-API-Key": clave() },
-  });
-  if (r.status === 401) {
-    localStorage.removeItem("sidhe_api_key");
-    mostrarLogin(true);
-    return;
-  }
+/* ---------- Metricas ---------- */
+
+async function cargarMetricas() {
+  const r = await api("/internal/metricas?dias=" + $("dias").value);
   if (!r.ok) { alert("Error cargando metricas: " + r.status); return; }
-  pintar(await r.json());
+  pintarMetricas(await r.json());
 }
 
 function tarjeta(rotulo, cifra, nota) {
-  return '<div class="tarjeta"><div class="rotulo">' + rotulo +
-         '</div><div class="cifra">' + cifra +
-         '</div><div class="nota">' + (nota || "") + '</div></div>';
+  return '<div class="tarjeta"><div class="rotulo">' + esc(rotulo) +
+         '</div><div class="cifra">' + esc(cifra) +
+         '</div><div class="nota">' + esc(nota || "") + '</div></div>';
 }
 
 function duracion(seg) {
@@ -139,7 +222,7 @@ function filas(datos, columnas, vacio) {
   return datos.join("");
 }
 
-function pintar(d) {
+function pintarMetricas(d) {
   $("tarjetas").innerHTML = [
     tarjeta("Clientes atendidos", d.resumen.clientes, d.dias + " dias"),
     tarjeta("Mensajes", d.resumen.mensajes,
@@ -158,15 +241,15 @@ function pintar(d) {
   $("canales").innerHTML =
     "<tr><th>Canal</th><th>Clientes</th><th>Mensajes</th></tr>" +
     filas(d.por_canal.map(function (c) {
-      return "<tr><td>" + c.canal + "</td><td>" + c.clientes +
+      return "<tr><td>" + esc(c.canal) + "</td><td>" + c.clientes +
              "</td><td>" + c.mensajes + "</td></tr>";
     }), 3, "Sin datos");
 
   $("proximas").innerHTML =
     "<tr><th>Folio</th><th>Cliente</th><th>Sucursal</th><th>Fecha</th><th>Hora</th></tr>" +
     filas(d.proximas_citas.map(function (c) {
-      return "<tr><td>" + c.folio + "</td><td>" + c.cliente + "</td><td>" +
-             c.sucursal + "</td><td>" + c.fecha + "</td><td>" + c.hora + "</td></tr>";
+      return "<tr><td>" + c.folio + "</td><td>" + esc(c.cliente) + "</td><td>" +
+             esc(c.sucursal) + "</td><td>" + c.fecha + "</td><td>" + c.hora + "</td></tr>";
     }), 5, "Sin citas proximas");
 
   const max = Math.max.apply(null, [1].concat(d.top_sucursales.map(function (s) {
@@ -175,7 +258,7 @@ function pintar(d) {
   $("sucursales").innerHTML =
     "<tr><th>Sucursal</th><th>Citas</th><th></th></tr>" +
     filas(d.top_sucursales.map(function (s) {
-      return "<tr><td>" + s.sucursal + "</td><td>" + s.citas +
+      return "<tr><td>" + esc(s.sucursal) + "</td><td>" + s.citas +
              '</td><td><div class="barra" style="width:' +
              (100 * s.citas / max) + '%"></div></td></tr>';
     }), 3, "Sin citas");
@@ -200,28 +283,156 @@ function dibujarSerie(serie) {
     '<text x="4" y="14" fill="#9aa3b2" font-size="11">max ' + max + '</text>';
 }
 
+/* ---------- Bandeja ---------- */
+
+function hora(iso) {
+  if (!iso) return "";
+  const f = new Date(iso);
+  return f.toLocaleString("es-MX", { day: "2-digit", month: "short",
+                                     hour: "2-digit", minute: "2-digit" });
+}
+
+async function cargarLista() {
+  const r = await api("/internal/conversaciones?buscar=" +
+                      encodeURIComponent($("buscar").value) + "&limite=50");
+  if (!r.ok) return;
+  const datos = await r.json();
+  const lista = $("lista");
+  if (!datos.conversaciones.length) {
+    lista.innerHTML = '<div class="vacio">Sin conversaciones</div>';
+    return;
+  }
+  lista.innerHTML = datos.conversaciones.map(function (c) {
+    const sel = actual && actual.canal === c.canal && actual.user_id === c.user_id;
+    return '<div class="item' + (sel ? " sel" : "") + '"' +
+      ' data-canal="' + esc(c.canal) + '" data-user="' + esc(c.user_id) + '">' +
+      '<div class="quien"><span>' + esc(c.user_id) + '</span>' +
+      '<span class="nota">' + hora(c.ultima_fecha) + '</span></div>' +
+      '<div class="previo">' + (c.ultima_direccion === "in" ? "" : "Tu: ") +
+      esc(c.ultimo_mensaje) + '</div>' +
+      '<div style="margin-top:6px"><span class="etiqueta et-canal">' +
+      esc(c.canal) + '</span> ' +
+      (c.bot_pausado ? '<span class="etiqueta et-humano">humano</span>' : '') +
+      '</div></div>';
+  }).join("");
+
+  Array.prototype.forEach.call(lista.querySelectorAll(".item"), function (el) {
+    el.onclick = function () {
+      abrir(el.dataset.canal, el.dataset.user);
+    };
+  });
+}
+
+async function abrir(canal, userId) {
+  actual = { canal: canal, user_id: userId };
+  const r = await api("/internal/conversaciones/" + encodeURIComponent(canal) +
+                      "/" + encodeURIComponent(userId));
+  if (!r.ok) return;
+  const d = await r.json();
+
+  $("cabeceraChat").innerHTML =
+    '<div><strong>' + esc(d.user_id) + '</strong> ' +
+    '<span class="etiqueta et-canal">' + esc(d.canal) + '</span>' +
+    (d.bot_pausado ? ' <span class="etiqueta et-humano">atendida por humano</span>' : '') +
+    '<div class="nota">' + (d.ventana_abierta
+      ? "Ventana de 24h abierta: puedes escribir libremente."
+      : "Ventana de 24h vencida: WhatsApp rechazara texto libre.") + '</div></div>' +
+    (d.bot_pausado
+      ? '<button id="devolver">Devolver al bot</button>'
+      : '<span class="nota">El bot esta respondiendo</span>');
+
+  $("mensajes").innerHTML = d.mensajes.map(function (m) {
+    const clases = m.direccion === "in"
+      ? "burbuja entrante"
+      : "burbuja saliente" + (m.tipo === "humano" ? " humano" : "");
+    const etiqueta = m.direccion === "in"
+      ? (m.tipo === "audio" ? "nota de voz" : m.tipo)
+      : (m.tipo === "humano" ? "asesor" : "bot");
+    return '<div class="' + clases + '">' + esc(m.contenido) +
+           '<div class="meta">' + etiqueta + " - " + hora(m.fecha) + '</div></div>';
+  }).join("");
+  $("mensajes").scrollTop = $("mensajes").scrollHeight;
+
+  $("redactar").hidden = false;
+  const devolver = $("devolver");
+  if (devolver) {
+    devolver.onclick = async function () {
+      await api("/internal/conversaciones/" + encodeURIComponent(canal) + "/" +
+                encodeURIComponent(userId) + "/devolver-al-bot", { method: "POST" });
+      await abrir(canal, userId);
+      cargarLista();
+    };
+  }
+  cargarLista();
+}
+
+async function enviar() {
+  const texto = $("texto").value.trim();
+  if (!texto || !actual) return;
+  $("enviar").disabled = true;
+  try {
+    const r = await api("/internal/conversaciones/" +
+      encodeURIComponent(actual.canal) + "/" +
+      encodeURIComponent(actual.user_id) + "/responder", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ texto: texto }),
+    });
+    if (!r.ok) {
+      const e = await r.json().catch(function () { return {}; });
+      alert("No se pudo enviar: " + (e.detail || r.status));
+      return;
+    }
+    $("texto").value = "";
+    await abrir(actual.canal, actual.user_id);
+  } finally {
+    $("enviar").disabled = false;
+  }
+}
+
+/* ---------- Navegacion ---------- */
+
+function verMetricas() {
+  $("tabMetricas").classList.add("activo");
+  $("tabBandeja").classList.remove("activo");
+  $("vistaMetricas").hidden = false;
+  $("vistaBandeja").hidden = true;
+  cargarMetricas();
+}
+
+function verBandeja() {
+  $("tabBandeja").classList.add("activo");
+  $("tabMetricas").classList.remove("activo");
+  $("vistaBandeja").hidden = false;
+  $("vistaMetricas").hidden = true;
+  cargarLista();
+}
+
+$("tabMetricas").onclick = verMetricas;
+$("tabBandeja").onclick = verBandeja;
+$("refrescar").onclick = cargarLista;
+$("buscar").onkeydown = function (e) { if (e.key === "Enter") cargarLista(); };
+$("enviar").onclick = enviar;
+$("texto").onkeydown = function (e) {
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) enviar();
+};
+$("dias").onchange = cargarMetricas;
+
 $("entrar").onclick = async function () {
   localStorage.setItem("sidhe_api_key", $("clave").value.trim());
   const r = await fetch("/internal/metricas?dias=7", {
     headers: { "X-API-Key": clave() },
   });
-  if (r.ok) {
-    $("login").hidden = true;
-    $("app").hidden = false;
-    cargar();
-  } else {
-    localStorage.removeItem("sidhe_api_key");
-    mostrarLogin(true);
-  }
+  if (r.ok) { $("login").hidden = true; $("app").hidden = false; verMetricas(); }
+  else { localStorage.removeItem("sidhe_api_key"); mostrarLogin(true); }
 };
 $("clave").onkeydown = function (e) { if (e.key === "Enter") $("entrar").click(); };
 $("salir").onclick = function () {
   localStorage.removeItem("sidhe_api_key");
   mostrarLogin(false);
 };
-$("dias").onchange = cargar;
 
-if (clave()) { $("app").hidden = false; cargar(); } else { mostrarLogin(false); }
+if (clave()) { $("app").hidden = false; verMetricas(); } else { mostrarLogin(false); }
 </script>
 </body>
 </html>

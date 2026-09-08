@@ -215,7 +215,32 @@ Todo se calcula sobre las tablas de auditoría (`mensajes`, `citas`,
 empiece a escribir con canal `facebook` o `instagram`, aparecen solos en el
 panel** — no hay nada que cambiar en las métricas.
 
-Para revisar el diseño sin base de datos (métricas de ejemplo):
+### Bandeja de conversaciones
+
+La pestaña **Conversaciones** del panel es una bandeja: lista de chats
+ordenados por actividad, historial completo (con las notas de voz ya
+transcritas y los toques de botón) y caja para responder a mano.
+
+**Responder toma el control de la conversación**: al enviar un mensaje desde
+el panel se crea un escalamiento pendiente y el bot se calla en ese chat — si
+no, bot y asesor contestarían al mismo cliente. El botón *Devolver al bot* lo
+reactiva. La cabecera avisa si la ventana de 24h de WhatsApp sigue abierta;
+fuera de ella WhatsApp rechaza el texto libre y el panel lo dice.
+
+Endpoints (todos con `X-API-Key`):
+
+```
+GET  /internal/conversaciones?buscar=&limite=50
+GET  /internal/conversaciones/{canal}/{user_id}
+POST /internal/conversaciones/{canal}/{user_id}/responder        {"texto": "..."}
+POST /internal/conversaciones/{canal}/{user_id}/devolver-al-bot
+```
+
+Enviar solo funciona en canales con adaptador (hoy WhatsApp); en Instagram o
+Facebook el endpoint responde 400 explicando por qué, hasta que exista el
+adaptador de Chatwoot.
+
+Para revisar el diseño sin base de datos (métricas y chats de ejemplo):
 
 ```bash
 uv run python scripts/demo_panel.py   # http://localhost:8123/panel
