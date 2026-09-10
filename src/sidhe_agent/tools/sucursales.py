@@ -27,6 +27,7 @@ def _a_dict(sucursal: Sucursal) -> dict:
         "zona": sucursal.zona,
         "direccion": sucursal.direccion,
         "horario": _horario(sucursal.horario_apertura, sucursal.horario_cierre),
+        "telefono": sucursal.telefono,
     }
 
 
@@ -68,7 +69,9 @@ async def buscar_sucursal(texto_ubicacion: str) -> list[dict]:
 
     Hace matching tolerante a acentos contra nombre, alias, ciudad y zona
     (ej. "perisur", "satelite", "guadalajara"). Devuelve máximo 10 sucursales
-    con id, nombre, ciudad, zona, dirección y horario. Si devuelve lista
+    con id, nombre, ciudad, zona, dirección, horario y teléfono. Compárte el
+    teléfono cuando el cliente pregunte por una sucursal o quiera enviar sus
+    estudios. Si devuelve lista
     vacía, dile al cliente que no encontraste sucursal en esa ubicación y
     ofrécele ver las zonas disponibles (tool listar_zonas).
 

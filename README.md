@@ -119,6 +119,7 @@ Notas de operación:
 | `EMBEDDINGS_MODEL` | Vacío = default del proveedor; dimensión fija 1024 |
 | `VOYAGE_API_KEY` / `COHERE_API_KEY` | Según el proveedor elegido |
 | `INTERNAL_API_KEY` | Protege los endpoints `/internal/*` |
+| `HORAS_REACTIVAR_BOT` | Horas sin atención antes de que el bot retome (default 4) |
 | `TWILIO_RECORDATORIO_CONTENT_SID` | SID (HX...) del template de recordatorio aprobado |
 | `GOOGLE_CREDENTIALS_JSON` | JSON completo de la cuenta de servicio (vacío = sin calendario) |
 | `GOOGLE_CALENDAR_RECORDATORIO_MIN` | Minutos de aviso en el evento (default 60) |
@@ -197,6 +198,47 @@ Para reportes o para reconciliar si un webhook se perdió:
 GET /internal/citas?desde=2026-09-01&hasta=2026-09-15
 Header: X-API-Key: <INTERNAL_API_KEY>
 ```
+
+## Estado de pedidos (hoja STATUS del Excel de operaciones)
+
+El bot responde "¿ya están mis plantillas?" consultando la tabla `pedidos`,
+un espejo de la hoja STATUS. **Busca por el teléfono de la conversación**, que
+el sistema ya conoce: el cliente no tiene que dar ningún dato. Solo si ese
+número no aparece (≈15% de los registros no traen teléfono) pide nombre
+completo y sucursal.
+
+Los status se escriben a mano y tienen variantes, así que se normalizan a
+categorías cerradas y **lo ambiguo se manda a un asesor en vez de
+interpretarlo**:
+
+| Categoría | Status de la hoja |
+|---|---|
+| `listo_en_sucursal` | EN SUCURSAL |
+| `entregado` | ENTREGADO |
+| `enviado_a_domicilio` | ENVIADO A DOMICILIO (y variantes) |
+| `en_proceso` | IMPRESION, IMPRESION LISTA, TERMINADO, PEGADO, PEDIDO |
+| `requiere_revision` | vacío, VER EN GARANTIAS, VER EN PX PEND ESTUDIOS, NO PROCEDE, cualquier cosa desconocida |
+
+Con el archivo actual: 92.7% de los pedidos obtienen respuesta directa y 7.3%
+van a un asesor.
+
+Importar (reemplaza la tabla completa; el Excel es la fuente de verdad):
+
+```bash
+uv run python scripts/importar_pedidos.py "PACIENTES SUPERVISION.xlsx"
+```
+
+## Conversaciones abandonadas
+
+Un escalamiento sin respuesta dejaba al cliente escribiendo al vacío (pasó de
+verdad: cinco días de mensajes sin que nadie contestara). Ahora:
+
+- Si nadie atiende un escalamiento en `HORAS_REACTIVAR_BOT` horas (default 4),
+  **el bot retoma la conversación**, se disculpa una vez por la demora y sigue
+  atendiendo.
+- `GET /internal/escalamientos/pendientes` lista los que esperan y cuántas
+  horas llevan, para que n8n avise al equipo antes de que se llegue a ese
+  límite.
 
 ## Panel de métricas
 

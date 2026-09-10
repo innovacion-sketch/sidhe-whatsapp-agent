@@ -49,6 +49,12 @@ NOTA_ESCALAMIENTO_RESUELTO = (
     "normalidad: si el cliente pide algo que puedes resolver (como agendar "
     "una cita), hazlo tú mismo y no digas que hay un asesor en camino."
 )
+NOTA_NADIE_ATENDIO = (
+    "[nota del sistema] Escalaste esta conversación pero ningún asesor la "
+    "atendió en varias horas y vuelve a estar a tu cargo. Discúlpate una vez "
+    "por la demora, retoma la atención y resuelve lo que puedas tú mismo; "
+    "vuelve a escalar solo si de verdad no puedes."
+)
 MENSAJE_ATORADO = (
     "Perdón, me enredé buscando esa información. ¿Me dices de nuevo qué "
     "necesitas? Si prefieres, puedo pasarte con un asesor."
@@ -219,10 +225,23 @@ async def procesar_mensaje(app: FastAPI, entrante: IncomingMessage) -> None:
         if any(t.interrupts for t in snapshot.tasks):
             log.info("thread_escalado_bot_en_silencio")
             return
-        if await conversaciones.bot_pausado(entrante.canal, entrante.user_id):
-            # Un humano tomo la conversacion desde el panel: el bot no opina.
+        estado_atencion = await conversaciones.revisar_pausa(
+            entrante.canal, entrante.user_id, get_settings().horas_reactivar_bot
+        )
+        if estado_atencion == conversaciones.PAUSADO:
+            # Una persona lleva la conversacion: el bot no opina.
             log.info("conversacion_atendida_por_humano")
             return
+        if estado_atencion == conversaciones.REACTIVADO:
+            # Nadie contesto en horas: mejor un bot que un cliente en silencio.
+            log.warning("escalamiento_abandonado_bot_retoma")
+            await app.state.graph.aupdate_state(
+                config,
+                {
+                    "messages": [HumanMessage(content=NOTA_NADIE_ATENDIO)],
+                    "escalado": False,
+                },
+            )
 
         transcripcion = None
         if entrante.tipo == "audio":
@@ -617,3 +636,20 @@ async def devolver_al_bot(
     return await resolver_escalamiento(
         ResolverEscalamiento(user_id=user_id, canal=canal), x_api_key
     )
+
+
+@app.get("/internal/escalamientos/pendientes")
+async def escalamientos_pendientes(
+    x_api_key: str = Header(default=""),
+) -> dict[str, Any]:
+    """Escalamientos sin atender, con cuánto llevan esperando.
+
+    Pensado para que n8n consulte cada pocos minutos y avise al equipo.
+    """
+    _validar_api_key_interna(x_api_key)
+    pendientes = await conversaciones.pendientes_detallados()
+    return {
+        "total": len(pendientes),
+        "horas_para_reactivar_bot": get_settings().horas_reactivar_bot,
+        "escalamientos": pendientes,
+    }

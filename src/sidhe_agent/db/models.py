@@ -157,3 +157,37 @@ class Escalamiento(Base):
     creado_en: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class Pedido(Base):
+    """Estado de fabricación de las plantillas de cada paciente.
+
+    Es un espejo de la hoja STATUS del Excel de operaciones, no la fuente de
+    verdad: se reemplaza completa en cada sincronización. Se busca por
+    teléfono (el bot ya conoce el del cliente) y, como respaldo, por nombre
+    normalizado + sucursal.
+    """
+
+    __tablename__ = "pedidos"
+    __table_args__ = (
+        Index("ix_pedidos_telefono", "telefono"),
+        Index("ix_pedidos_nombre_sucursal", "sucursal", "nombre_normalizado"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    fecha: Mapped[datetime.date | None] = mapped_column(Date)
+    nombre: Mapped[str] = mapped_column(String(200), nullable=False)
+    # Sin acentos, en mayúsculas y con espacios colapsados, para buscar
+    nombre_normalizado: Mapped[str] = mapped_column(String(200), nullable=False)
+    sucursal: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    # Últimos 10 dígitos, como vienen en la hoja
+    telefono: Mapped[str | None] = mapped_column(String(10))
+    status_original: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    # Categoría estable con la que el agente decide qué decir
+    status: Mapped[str] = mapped_column(String(30), default="", nullable=False)
+    lugar_impresion: Mapped[str | None] = mapped_column(String(80))
+    localizacion_final: Mapped[str | None] = mapped_column(String(80))
+    envio: Mapped[str | None] = mapped_column(String(120))
+    importado_en: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

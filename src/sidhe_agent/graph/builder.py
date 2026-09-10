@@ -26,6 +26,7 @@ from ..tools.citas import (
     consultar_mis_citas,
 )
 from ..tools.conocimiento import buscar_conocimiento
+from ..tools.pedidos import consultar_estado_pedido
 from ..tools.escalamiento import escalar_a_humano
 from ..tools.presentacion import presentar_opciones
 from ..tools.sucursales import buscar_sucursal, listar_zonas
@@ -47,6 +48,7 @@ TOOLS = [
     consultar_mis_citas,
     cancelar_cita,
     presentar_opciones,
+    consultar_estado_pedido,
 ]
 
 

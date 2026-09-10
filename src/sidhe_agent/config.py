@@ -78,6 +78,10 @@ class Settings(BaseSettings):
     # API interna (recordatorios vía n8n)
     internal_api_key: str = ""
 
+    # Si nadie del equipo contesta un escalamiento en estas horas, el bot
+    # retoma la conversación: un cliente en silencio es peor que un bot.
+    horas_reactivar_bot: int = 4
+
     # Google Calendar: credenciales de la cuenta de servicio. Acepta el JSON
     # en una sola línea O el mismo JSON en base64 (ver `google_credentials`).
     # Vacío = sincronización desactivada.

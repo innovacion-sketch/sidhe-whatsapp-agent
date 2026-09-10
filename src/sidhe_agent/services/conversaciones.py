@@ -10,7 +10,7 @@ el agente o si un humano tomó el control desde el panel.
 import datetime
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from ..config import get_settings
 from ..db.models import Escalamiento, Mensaje
@@ -163,3 +163,71 @@ def _ventana_abierta(ultimo_entrante: dict | None) -> bool:
         return False
     fecha = datetime.datetime.fromisoformat(ultimo_entrante["fecha"])
     return (_ahora() - fecha) < datetime.timedelta(hours=VENTANA_LIBRE_HORAS)
+
+
+ACTIVO = "activo"
+PAUSADO = "pausado"
+REACTIVADO = "reactivado"
+
+
+async def revisar_pausa(canal: str, user_id: str, horas_limite: int) -> str:
+    """Estado de atención de la conversación, reactivando si se abandonó.
+
+    Un escalamiento sin respuesta deja al cliente escribiendo al vacío (pasó:
+    cinco días de mensajes sin que nadie contestara). Si nadie lo atendió en
+    `horas_limite`, se cierra y el bot vuelve a hacerse cargo.
+    """
+    async with get_session() as session:
+        fila = (
+            await session.execute(
+                select(func.min(Escalamiento.creado_en)).where(
+                    Escalamiento.canal == canal,
+                    Escalamiento.user_id == user_id,
+                    Escalamiento.estado == "pendiente",
+                )
+            )
+        ).scalar()
+        if fila is None:
+            return ACTIVO
+
+        antiguedad = _ahora() - fila
+        if antiguedad < datetime.timedelta(hours=horas_limite):
+            return PAUSADO
+
+        await session.execute(
+            update(Escalamiento)
+            .where(
+                Escalamiento.canal == canal,
+                Escalamiento.user_id == user_id,
+                Escalamiento.estado == "pendiente",
+            )
+            .values(estado="atendido")
+        )
+        await session.commit()
+        return REACTIVADO
+
+
+async def pendientes_detallados() -> list[dict]:
+    """Escalamientos sin atender, para avisar al equipo desde n8n."""
+    ahora = _ahora()
+    async with get_session() as session:
+        filas = (
+            await session.execute(
+                select(Escalamiento)
+                .where(Escalamiento.estado == "pendiente")
+                .order_by(Escalamiento.creado_en)
+            )
+        ).scalars().all()
+    return [
+        {
+            "id": e.id,
+            "canal": e.canal,
+            "user_id": e.user_id,
+            "motivo": e.motivo,
+            "creado_en": e.creado_en.isoformat(),
+            "horas_esperando": round(
+                (ahora - e.creado_en).total_seconds() / 3600, 1
+            ),
+        }
+        for e in filas
+    ]
