@@ -159,3 +159,20 @@ def test_la_tolerancia_no_confunde_sucursales_distintas():
     assert not pedidos.sucursal_compatible("Liverpool", "PERISUR")
     assert not pedidos.sucursal_compatible("", "PERISUR")
     assert not pedidos.sucursal_compatible("Perisur", "")
+
+
+def test_cali_no_es_aguascalientes():
+    """AguasCALIentes contiene CALI: comparar pedazos mentia al cliente."""
+    assert not pedidos.sucursal_compatible(
+        "CALI", "Liverpool Altaria Aguascalientes"
+    )
+    assert not pedidos.sucursal_compatible("LEON", "Liverpool Napoleon")
+
+
+def test_relaciona_las_etiquetas_raras_de_la_hoja():
+    """Las que operaciones escribe distinto a como se llaman."""
+    assert pedidos.sucursal_compatible("GDL LA PERLA", "Liverpool La Perla Guadalajara")
+    assert pedidos.sucursal_compatible("TOLUCA", "Liverpool Galerías Metepec")
+    assert pedidos.sucursal_compatible("Metepec", "TOLUCA")
+    assert pedidos.sucursal_compatible("SANLUIS", "SAN LUIS")
+    assert pedidos.sucursal_compatible("Liverpool San Luis Potosí", "SAN LUIS")

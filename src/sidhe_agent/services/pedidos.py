@@ -130,18 +130,37 @@ async def buscar_por_telefono(telefono: str) -> list[dict]:
     return [_a_dict(p) for p in filas]
 
 
+# Palabras que traen casi todas las sucursales y no distinguen a ninguna
+GENERICAS = frozenset(
+    {"LIVERPOOL", "PLAZA", "GALERIAS", "CENTRO", "COMERCIAL",
+     "DE", "DEL", "LA", "EL", "LOS", "LAS"}
+)
+
+# Cómo nombra operaciones a una sucursal contra cómo la nombramos nosotros
+SINONIMOS = {"GDL": "GUADALAJARA", "TOLUCA": "METEPEC"}
+
+
+def _palabras_clave(texto: str) -> list[str]:
+    palabras = [SINONIMOS.get(p, p) for p in normalizar_texto(texto).split()]
+    return [p for p in palabras if p not in GENERICAS]
+
+
 def sucursal_compatible(dicha: str, en_la_hoja: str) -> bool:
     """¿El cliente se refiere a esta sucursal?
 
-    La hoja las nombra a su manera ("PARQUE DELTA", "GDLLAPERLA") y el
-    cliente dice otra ("Delta", "Liverpool Parque Delta"). Basta con que una
-    contenga a la otra, sin el "Liverpool" que llevan todas.
+    La hoja las nombra a su manera ("PARQUE DELTA", "GDL LA PERLA") y el
+    cliente dice otra ("Delta", "Liverpool Parque Delta"). Se comparan
+    PALABRAS COMPLETAS, no pedazos: comparar subcadenas hacía que "CALI"
+    coincidiera con "AguasCALIentes" y le habríamos dicho a un cliente de
+    Cali que sus plantillas estaban en Aguascalientes.
     """
-    a = normalizar_texto(dicha).replace("LIVERPOOL", "").strip()
-    b = normalizar_texto(en_la_hoja).replace("LIVERPOOL", "").strip()
+    a, b = _palabras_clave(dicha), _palabras_clave(en_la_hoja)
     if not a or not b:
         return False
-    return a in b or b in a
+    if set(a) <= set(b) or set(b) <= set(a):
+        return True
+    # "SANLUIS" contra "SAN LUIS": la misma palabra escrita junta
+    return "".join(a) == "".join(b)
 
 
 async def buscar_por_nombre(nombre: str, sucursal: str) -> list[dict]:
