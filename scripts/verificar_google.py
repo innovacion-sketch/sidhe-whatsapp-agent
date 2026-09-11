@@ -45,7 +45,17 @@ def revisar_credenciales() -> str | None:
         info = json.loads(crudo)
     except json.JSONDecodeError as exc:
         print(f"{ERROR} GOOGLE_CREDENTIALS_JSON no es JSON válido: {exc}")
-        print("      Si lo pegaste en base64, revisa que no le falten caracteres.")
+        print(f"      Llegaron {len(crudo)} caracteres; un JSON completo trae ~2300.")
+        if len(crudo) < 500:
+            # El caso real: el panel guarda cada variable en un solo renglón y
+            # se queda con la primera línea del JSON pegado en crudo.
+            print("      Parece que solo llegó el principio del archivo: el panel")
+            print("      cortó el JSON en el primer salto de línea. Conviértelo a")
+            print("      base64 (queda en un renglón) y vuelve a pegarlo:")
+            print('      [Convert]::ToBase64String([IO.File]::ReadAllBytes('
+                  '"$HOME\\Downloads\\llave.json")) | Set-Clipboard')
+        else:
+            print("      Si lo pegaste en base64, revisa que no le falten caracteres.")
         return None
 
     correo = info.get("client_email")
