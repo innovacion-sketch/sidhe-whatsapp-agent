@@ -176,3 +176,16 @@ def test_relaciona_las_etiquetas_raras_de_la_hoja():
     assert pedidos.sucursal_compatible("Metepec", "TOLUCA")
     assert pedidos.sucursal_compatible("SANLUIS", "SAN LUIS")
     assert pedidos.sucursal_compatible("Liverpool San Luis Potosí", "SAN LUIS")
+
+
+CONOCIDAS = ["Liverpool Polanco", "polanco", "Liverpool Delta", "parque delta"]
+
+
+def test_distingue_las_ventas_que_no_son_de_un_stand():
+    """B2B (eventos, empresas) y plazas que no operamos por este canal."""
+    assert pedidos.es_de_sucursal("POLANCO", CONOCIDAS)
+    assert pedidos.es_de_sucursal("PARQUE DELTA", CONOCIDAS)
+    for movil in ["BIMBO", "PFIZER", "world football summit", "CARRERA BATMAN",
+                  "TRIATLON HEROICO", "COLEGIO ARGOS", "CALI", "MEDELLIN",
+                  "UNICENTRO BOGOTA", ""]:
+        assert not pedidos.es_de_sucursal(movil, CONOCIDAS), movil

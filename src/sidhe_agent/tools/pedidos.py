@@ -52,15 +52,32 @@ PASAR_A_SUCURSAL = (
     "buscar_sucursal si aún no lo tienes."
 )
 
+# Ventas que no salieron de un stand: la sucursal móvil B2B (eventos y
+# empresas) y plazas que no atendemos por este canal. Aunque el status diga
+# que está listo, no sabemos a dónde mandar al cliente.
+GUIA_SIN_SUCURSAL = (
+    "Este pedido NO es de una sucursal: viene de una venta móvil o de "
+    "convenio (B2B). No le digas que pase a recoger a ningún stand ni le des "
+    "un teléfono de sucursal, porque no sabemos dónde recibirá sus "
+    "plantillas. Usa escalar_a_humano para que un asesor se lo confirme."
+)
 
-def _formatear(encontrados: list[dict]) -> dict:
-    return {
-        "encontrado": True,
-        "pedidos": [
-            {**p, "que_decir": GUIA.get(p["status"], GUIA[servicio.REVISION])}
-            for p in encontrados
-        ],
-    }
+
+async def _formatear(encontrados: list[dict]) -> dict:
+    conocidas = await servicio.etiquetas_de_sucursales()
+    pedidos = []
+    for p in encontrados:
+        de_sucursal = servicio.es_de_sucursal(p["sucursal"], conocidas)
+        pedidos.append({
+            **p,
+            "es_de_sucursal": de_sucursal,
+            "que_decir": (
+                GUIA.get(p["status"], GUIA[servicio.REVISION])
+                if de_sucursal
+                else GUIA_SIN_SUCURSAL
+            ),
+        })
+    return {"encontrado": True, "pedidos": pedidos}
 
 
 @tool
@@ -90,12 +107,12 @@ async def consultar_estado_pedido(
     telefono = state.get("user_id", "")
     encontrados = await servicio.buscar_por_telefono(telefono)
     if encontrados:
-        return _formatear(encontrados)
+        return await _formatear(encontrados)
 
     if nombre_completo and sucursal:
         encontrados = await servicio.buscar_por_nombre(nombre_completo, sucursal)
         if encontrados:
-            return _formatear(encontrados)
+            return await _formatear(encontrados)
         return {
             "encontrado": False,
             "motivo": "no_encontrado_por_nombre",

@@ -20,7 +20,7 @@ import unicodedata
 
 from sqlalchemy import delete, func, select
 
-from ..db.models import Pedido
+from ..db.models import Pedido, Sucursal
 from ..db.session import get_session
 
 # Categorías con las que responde el agente
@@ -301,3 +301,32 @@ def resumen(registros: list[dict]) -> dict:
         "hasta": max(fechas).isoformat() if fechas else None,
         "por_categoria": por_categoria,
     }
+
+
+async def etiquetas_de_sucursales() -> list[str]:
+    """Nombres y alias de las sucursales activas, para reconocer la hoja.
+
+    La hoja también registra ventas que NO salen de un stand: eventos y
+    corporativos (la sucursal móvil B2B) y plazas que no operamos por este
+    canal. Sirve para distinguirlas.
+    """
+    async with get_session() as session:
+        filas = (
+            await session.execute(
+                select(Sucursal.nombre, Sucursal.alias).where(
+                    Sucursal.activa.is_(True)
+                )
+            )
+        ).all()
+    etiquetas = []
+    for nombre, alias in filas:
+        etiquetas.append(nombre)
+        etiquetas.extend(alias or [])
+    return etiquetas
+
+
+def es_de_sucursal(etiqueta: str, conocidas: list[str]) -> bool:
+    """¿Esta venta salió de un stand, o es móvil/B2B?"""
+    if not normalizar_texto(etiqueta):
+        return False
+    return any(sucursal_compatible(etiqueta, conocida) for conocida in conocidas)

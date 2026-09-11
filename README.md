@@ -268,6 +268,19 @@ Las excepciones ganan a los prefijos: `VER EN SUCURSAL` es revisión, no
 "listo". En la hoja real, la ventana de 3 meses da 5,199 pedidos, 94.6% con
 teléfono y **0 que requieran revisión humana**.
 
+### Ventas que no son de una sucursal
+
+La hoja usa 39 etiquetas de sucursal contra las 28 del bot. Las que sobran
+son la **unidad móvil B2B** (eventos y convenios: `BIMBO`, `PFIZER`,
+`world football summit`, carreras…) y plazas que no atendemos por este canal
+(Colombia). El bot las reconoce comparando contra los nombres y alias de las
+sucursales activas y, cuando no ubica un stand, **escala con un asesor
+aunque el pedido figure como listo**: no tendría a dónde mandar al cliente.
+
+La comparación es por palabra completa, nunca por subcadena: `CALI` es
+subcadena de `AguasCALIentes` y llegamos a mandar un pedido de Cali a
+Aguascalientes en pruebas.
+
 ### Sincronizar desde el Google Sheet (recomendado)
 
 Se lee en vivo con la **misma cuenta de servicio de Calendar**, así que no hay

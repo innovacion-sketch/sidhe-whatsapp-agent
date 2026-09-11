@@ -124,3 +124,28 @@ def test_endpoint_responde_503_cuando_google_falla(cliente):
 def test_la_epoca_de_sheets_coincide_con_la_de_excel():
     """Sheets y Excel cuentan los dias desde 1899-12-30."""
     assert pedidos._fecha_valida(42374) == datetime.date(2016, 1, 5)
+
+
+async def test_un_pedido_b2b_se_manda_con_un_asesor():
+    """Aunque diga EN SUCURSAL: no sabemos a que stand mandar al cliente."""
+    from sidhe_agent.tools import pedidos as herramienta
+
+    encontrados = [
+        {"nombre": "ANA LOPEZ", "sucursal": "BIMBO", "status": pedidos.LISTO,
+         "status_en_sistema": "EN SUCURSAL", "donde_esta": "BIMBO",
+         "fecha_del_estudio": "2026-09-01"},
+        {"nombre": "ANA LOPEZ", "sucursal": "POLANCO", "status": pedidos.LISTO,
+         "status_en_sistema": "EN SUCURSAL", "donde_esta": "POLANCO",
+         "fecha_del_estudio": "2026-09-02"},
+    ]
+    with patch.object(
+        pedidos, "etiquetas_de_sucursales",
+        AsyncMock(return_value=["Liverpool Polanco", "polanco"]),
+    ):
+        salida = await herramienta._formatear(encontrados)
+
+    b2b, stand = salida["pedidos"]
+    assert b2b["es_de_sucursal"] is False
+    assert "escalar_a_humano" in b2b["que_decir"]
+    assert stand["es_de_sucursal"] is True
+    assert "puede pasar a recogerlas" in stand["que_decir"]
