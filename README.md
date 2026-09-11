@@ -178,6 +178,26 @@ solo se registra el error.
 
 Las sucursales sin `calendar_id` simplemente no se sincronizan.
 
+**Atajo: crear los calendarios por API.** En vez de entrar sucursal por
+sucursal, la cuenta de servicio puede crear un calendario por sucursal,
+guardarlo en la base y compartirlo con el stand. Pon el correo de cada
+sucursal en la columna `correo_sucursal` de `data/sucursales.csv` y corre:
+
+```bash
+python scripts/crear_calendarios.py --dry-run   # qué haría
+python scripts/crear_calendarios.py             # hazlo
+python scripts/crear_calendarios.py --admin citas@sidhegroup.com
+```
+
+Es idempotente (omite las que ya tienen `calendar_id`), pausa entre altas
+para no toparse con el límite de uso de Google, y con `--admin` deja a una
+cuenta de la empresa como propietaria de cada calendario.
+
+Lo único que no se puede automatizar: **cada sucursal recibe un correo y
+alguien de esa cuenta tiene que hacer clic en "Añadir este calendario"**.
+Si no les llega, pueden agregarlo a mano con el id (Google Calendar → Otros
+calendarios → Suscribirse a un calendario → pegar el id).
+
 Para comprobar el setup completo (credenciales, qué sucursales tienen
 calendario y teléfono, y acceso al Sheet):
 

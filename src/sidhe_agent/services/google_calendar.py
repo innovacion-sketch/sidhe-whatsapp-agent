@@ -21,6 +21,9 @@ from ..config import get_settings
 logger = structlog.get_logger(__name__)
 
 ALCANCES = ["https://www.googleapis.com/auth/calendar.events"]
+# Crear calendarios y darles acceso necesita el alcance completo; se pide
+# solo desde scripts/crear_calendarios.py, no en la operación diaria.
+ALCANCES_ADMIN = ["https://www.googleapis.com/auth/calendar"]
 DURACION_DEFAULT_MIN = 60
 
 
@@ -28,16 +31,24 @@ def sincronizacion_activa() -> bool:
     return bool(get_settings().google_credentials)
 
 
-def _servicio() -> Any:
+def _construir(alcances: list[str]) -> Any:
     from google.oauth2 import service_account
     from googleapiclient.discovery import build
 
     info = json.loads(get_settings().google_credentials)
     credenciales = service_account.Credentials.from_service_account_info(
-        info, scopes=ALCANCES
+        info, scopes=alcances
     )
     # cache_discovery=False evita warnings y escrituras a disco en el contenedor
     return build("calendar", "v3", credentials=credenciales, cache_discovery=False)
+
+
+def _servicio() -> Any:
+    return _construir(ALCANCES)
+
+
+def _servicio_admin() -> Any:
+    return _construir(ALCANCES_ADMIN)
 
 
 def _cuerpo_evento(
@@ -120,3 +131,47 @@ async def borrar_evento(calendar_id: str | None, event_id: str | None) -> bool:
     except Exception:
         logger.exception("error_borrando_evento_calendario", event_id=event_id)
         return False
+
+
+# --- Alta de calendarios (setup, no operación diaria) -----------------------
+#
+# Estas funciones SÍ propagan el error: las usa un script interactivo que
+# necesita saber exactamente qué sucursal falló y por qué.
+
+def _crear_calendario_sync(nombre: str, zona: str) -> str:
+    calendario = (
+        _servicio_admin()
+        .calendars()
+        .insert(body={"summary": nombre, "timeZone": zona})
+        .execute()
+    )
+    return calendario["id"]
+
+
+def _compartir_sync(calendar_id: str, correo: str, rol: str) -> None:
+    (
+        _servicio_admin()
+        .acl()
+        .insert(
+            calendarId=calendar_id,
+            sendNotifications=True,
+            body={"role": rol, "scope": {"type": "user", "value": correo}},
+        )
+        .execute()
+    )
+
+
+async def crear_calendario(nombre: str) -> str:
+    """Crea un calendario nuevo, propiedad de la cuenta de servicio."""
+    return await asyncio.to_thread(
+        _crear_calendario_sync, nombre, get_settings().tz
+    )
+
+
+async def compartir_calendario(calendar_id: str, correo: str, rol: str) -> None:
+    """Da acceso a un correo. rol: 'reader', 'writer' u 'owner'.
+
+    Google le manda a ese correo una invitación con el enlace para añadir el
+    calendario a su lista; ese clic lo tiene que dar la sucursal.
+    """
+    await asyncio.to_thread(_compartir_sync, calendar_id, correo, rol)

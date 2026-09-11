@@ -22,6 +22,8 @@ from sidhe_agent.db.session import dispose_engine, get_session
 
 RUTA_CSV = Path(__file__).parent.parent / "data" / "sucursales.csv"
 
+CAMPOS_QUE_NO_SE_BORRAN = {"calendar_id", "telefono"}
+
 DIAS_LV_S = ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado"]
 DIAS_TODOS = DIAS_LV_S + ["domingo"]
 
@@ -152,8 +154,13 @@ async def main() -> None:
                 )
             ).scalar_one_or_none()
             if existente:
-                # Upsert: re-ejecutar el seed aplica correcciones del CSV
+                # Upsert: re-ejecutar el seed aplica correcciones del CSV.
+                # Un campo vacío en el CSV NO borra lo que ya hay: el
+                # calendar_id lo escribe crear_calendarios.py directo en la
+                # base, y no queremos perderlo al recargar el CSV.
                 for campo, valor in registro.items():
+                    if valor in (None, "") and campo in CAMPOS_QUE_NO_SE_BORRAN:
+                        continue
                     setattr(existente, campo, valor)
                 existente.activa = True
                 actualizadas += 1
