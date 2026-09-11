@@ -190,6 +190,10 @@ Con `--probar` crea un evento de prueba en esa sucursal y lo borra enseguida:
 es la única forma de confirmar que el calendario se compartió con permiso de
 escritura y no solo de lectura.
 
+> Dentro del contenedor **no hay `uv`** (la imagen final solo trae el venv en
+> el `PATH`): ahí todos los scripts se corren como `python scripts/…`. El
+> prefijo `uv run` es para tu máquina de desarrollo.
+
 El evento incluye nombre del cliente, teléfono, folio, dirección del stand y
 un recordatorio popup (`GOOGLE_CALENDAR_RECORDATORIO_MIN`, default 60 min).
 Al cancelar por WhatsApp, el evento se borra del calendario.
