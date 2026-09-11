@@ -149,3 +149,42 @@ async def test_un_pedido_b2b_se_manda_con_un_asesor():
     assert "escalar_a_humano" in b2b["que_decir"]
     assert stand["es_de_sucursal"] is True
     assert "puede pasar a recogerlas" in stand["que_decir"]
+
+
+async def test_el_bot_se_sincroniza_solo_y_sobrevive_a_los_fallos():
+    """Un fallo de Google no puede matar el temporizador del servicio."""
+    import asyncio
+
+    intentos = []
+
+    async def falla_y_luego_funciona():
+        intentos.append(1)
+        if len(intentos) == 1:
+            raise google_sheets.ErrorSincronizacion("Google no responde")
+        return {"pedidos": 10}
+
+    with patch.object(
+        google_sheets, "sincronizacion_activa", lambda: True
+    ), patch.object(
+        google_sheets, "sincronizar", AsyncMock(side_effect=falla_y_luego_funciona)
+    ):
+        tarea = asyncio.create_task(
+            google_sheets.sincronizar_periodicamente(
+                horas=0.0001, espera_inicial=0
+            )
+        )
+        await asyncio.sleep(0.5)
+        tarea.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await tarea
+
+    assert len(intentos) > 1, "el fallo detuvo el temporizador"
+
+
+async def test_no_se_programa_si_no_hay_hoja_configurada():
+    """Sin credenciales o sin id, el temporizador ni arranca."""
+    with patch.object(google_sheets, "sincronizacion_activa", lambda: False):
+        await google_sheets.sincronizar_periodicamente(horas=2, espera_inicial=0)
+
+    with patch.object(google_sheets, "sincronizacion_activa", lambda: True):
+        await google_sheets.sincronizar_periodicamente(horas=0, espera_inicial=0)

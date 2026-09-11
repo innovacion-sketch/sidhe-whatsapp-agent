@@ -116,3 +116,34 @@ async def sincronizar(meses: int | None = None) -> dict:
     resumen["meses"] = meses
     logger.info("pedidos_sincronizados", **resumen)
     return resumen
+
+
+async def sincronizar_periodicamente(horas: int, espera_inicial: float = 30.0) -> None:
+    """Mantiene la copia al día sin depender de un cron externo.
+
+    Vive mientras vive el servicio. Ningún fallo la mata: si Google no
+    responde, se registra y se reintenta en el siguiente ciclo, con la copia
+    anterior intacta.
+
+    La primera corrida espera un poco para no competir con el arranque: el
+    webhook de WhatsApp tiene que poder contestar desde el segundo uno.
+    """
+    if horas <= 0:
+        logger.info("sincronizacion_periodica_apagada")
+        return
+    if not sincronizacion_activa():
+        logger.info("sincronizacion_periodica_sin_configurar")
+        return
+
+    logger.info("sincronizacion_periodica_programada", cada_horas=horas)
+    await asyncio.sleep(espera_inicial)
+    while True:
+        try:
+            await sincronizar()
+        except asyncio.CancelledError:
+            raise
+        except ErrorSincronizacion as exc:
+            logger.warning("sincronizacion_periodica_fallida", error=str(exc))
+        except Exception:
+            logger.exception("sincronizacion_periodica_error_inesperado")
+        await asyncio.sleep(horas * 3600)

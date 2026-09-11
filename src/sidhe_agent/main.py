@@ -5,9 +5,10 @@ Patrón del webhook: validar firma → idempotencia por MessageSid → responder
 API REST de Twilio (no TwiML).
 """
 
+import asyncio
 import datetime
 import uuid
-from contextlib import AsyncExitStack, asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -117,8 +118,21 @@ async def lifespan(app: FastAPI):
         auth_token=settings.twilio_auth_token,
         from_number=settings.twilio_whatsapp_from,
     )
+    # La hoja de pedidos se relee sola: sin esto habria que empujarla desde
+    # n8n y una sincronizacion olvidada es un cliente al que le decimos que
+    # sus plantillas siguen en fabricacion cuando ya estan en la sucursal.
+    app.state.sincronizador = asyncio.create_task(
+        google_sheets.sincronizar_periodicamente(
+            settings.pedidos_sincronizar_cada_horas
+        )
+    )
+
     logger.info("app_iniciada", modelo=settings.anthropic_model)
     yield
+
+    app.state.sincronizador.cancel()
+    with suppress(asyncio.CancelledError):
+        await app.state.sincronizador
     await app.state.stack.aclose()
     await dispose_engine()
 

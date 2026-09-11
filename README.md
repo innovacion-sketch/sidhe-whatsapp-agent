@@ -126,6 +126,7 @@ Notas de operación:
 | `GOOGLE_SHEETS_PEDIDOS_ID` | Id del Sheet de operaciones (vacío = sin sincronizar pedidos) |
 | `GOOGLE_SHEETS_PEDIDOS_HOJA` | Pestaña con el estado de pedidos (default `STATUS`) |
 | `PEDIDOS_MESES_HISTORIAL` | Meses de pedidos que se guardan (default 3) |
+| `PEDIDOS_SINCRONIZAR_CADA_HORAS` | Cada cuánto relee la hoja el servicio (default 2; `0` = nunca) |
 | `N8N_WEBHOOK_CITAS` | URL del webhook de n8n para citas (vacío = no se envía) |
 | `TZ` | `America/Mexico_City` |
 | `LOG_LEVEL` | `INFO` por default |
@@ -297,7 +298,11 @@ uv run python scripts/verificar_google.py     # diagnóstico de todo lo de Googl
 uv run python scripts/sincronizar_pedidos.py  # sincroniza una vez
 ```
 
-En producción, un cron de n8n cada pocas horas:
+**En producción no hace falta ningún cron**: el propio servicio relee la
+hoja cada `PEDIDOS_SINCRONIZAR_CADA_HORAS` horas (default 2), desde que
+arranca y mientras viva. Se apaga poniendo esa variable en `0`.
+
+Si aun así quieres empujarla desde fuera (n8n, un cron, un botón):
 
 ```
 POST /internal/pedidos/sincronizar

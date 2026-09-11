@@ -96,6 +96,9 @@ class Settings(BaseSettings):
     google_sheets_pedidos_hoja: str = "STATUS"
     # Solo se guardan los pedidos de estos meses; lo anterior es historial.
     pedidos_meses_historial: int = 3
+    # Cada cuántas horas relee la hoja el propio servicio (0 = nunca, y
+    # entonces hay que sincronizar desde fuera con /internal/pedidos/sincronizar)
+    pedidos_sincronizar_cada_horas: int = 2
 
     # n8n: webhook al que se avisa cada cita creada/cancelada (para Sheets).
     # Vacío = no se envía nada.
