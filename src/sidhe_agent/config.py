@@ -89,6 +89,14 @@ class Settings(BaseSettings):
     # Minutos de recordatorio del evento (popup) en el calendario del stand
     google_calendar_recordatorio_min: int = 60
 
+    # Google Sheets: hoja de operaciones con el estado de los pedidos. Se lee
+    # con la MISMA cuenta de servicio (compartir el Sheet con ese correo).
+    # El id es lo que va entre /d/ y /edit en la URL. Vacío = sin sincronizar.
+    google_sheets_pedidos_id: str = ""
+    google_sheets_pedidos_hoja: str = "STATUS"
+    # Solo se guardan los pedidos de estos meses; lo anterior es historial.
+    pedidos_meses_historial: int = 3
+
     # n8n: webhook al que se avisa cada cita creada/cancelada (para Sheets).
     # Vacío = no se envía nada.
     n8n_webhook_citas: str = ""

@@ -123,6 +123,9 @@ Notas de operación:
 | `TWILIO_RECORDATORIO_CONTENT_SID` | SID (HX...) del template de recordatorio aprobado |
 | `GOOGLE_CREDENTIALS_JSON` | JSON completo de la cuenta de servicio (vacío = sin calendario) |
 | `GOOGLE_CALENDAR_RECORDATORIO_MIN` | Minutos de aviso en el evento (default 60) |
+| `GOOGLE_SHEETS_PEDIDOS_ID` | Id del Sheet de operaciones (vacío = sin sincronizar pedidos) |
+| `GOOGLE_SHEETS_PEDIDOS_HOJA` | Pestaña con el estado de pedidos (default `STATUS`) |
+| `PEDIDOS_MESES_HISTORIAL` | Meses de pedidos que se guardan (default 3) |
 | `N8N_WEBHOOK_CITAS` | URL del webhook de n8n para citas (vacío = no se envía) |
 | `TZ` | `America/Mexico_City` |
 | `LOG_LEVEL` | `INFO` por default |
@@ -175,6 +178,18 @@ solo se registra el error.
 
 Las sucursales sin `calendar_id` simplemente no se sincronizan.
 
+Para comprobar el setup completo (credenciales, qué sucursales tienen
+calendario y teléfono, y acceso al Sheet):
+
+```bash
+uv run python scripts/verificar_google.py
+uv run python scripts/verificar_google.py --probar "Liverpool Polanco"
+```
+
+Con `--probar` crea un evento de prueba en esa sucursal y lo borra enseguida:
+es la única forma de confirmar que el calendario se compartió con permiso de
+escritura y no solo de lectura.
+
 El evento incluye nombre del cliente, teléfono, folio, dirección del stand y
 un recordatorio popup (`GOOGLE_CALENDAR_RECORDATORIO_MIN`, default 60 min).
 Al cancelar por WhatsApp, el evento se borra del calendario.
@@ -199,34 +214,81 @@ GET /internal/citas?desde=2026-09-01&hasta=2026-09-15
 Header: X-API-Key: <INTERNAL_API_KEY>
 ```
 
-## Estado de pedidos (hoja STATUS del Excel de operaciones)
+## Estado de pedidos (hoja STATUS del Google Sheet de operaciones)
 
 El bot responde "¿ya están mis plantillas?" consultando la tabla `pedidos`,
-un espejo de la hoja STATUS. **Busca por el teléfono de la conversación**, que
+una copia de la hoja STATUS. **Busca por el teléfono de la conversación**, que
 el sistema ya conoce: el cliente no tiene que dar ningún dato. Solo si ese
-número no aparece (≈15% de los registros no traen teléfono) pide nombre
-completo y sucursal.
+número no aparece pide nombre completo y sucursal, y si aun así no aparece le
+pasa el teléfono de su sucursal para atención directa.
 
-Los status se escriben a mano y tienen variantes, así que se normalizan a
-categorías cerradas y **lo ambiguo se manda a un asesor en vez de
-interpretarlo**:
+Solo se guardan los últimos `PEDIDOS_MESES_HISTORIAL` meses (default 3): lo
+anterior es historial y nadie pregunta por WhatsApp por plantillas de hace dos
+años. La ventana se mide desde la fecha más reciente de la hoja, no desde hoy,
+para que un par de días sin actualizar no vacíe la tabla.
+
+### Qué puede decir el bot
+
+**Solo `EN SUCURSAL` autoriza a decir "ya puedes pasar por ellas"**. Todo lo
+demás sigue en fabricación; el bot no promete fechas.
 
 | Categoría | Status de la hoja |
 |---|---|
 | `listo_en_sucursal` | EN SUCURSAL |
 | `entregado` | ENTREGADO |
 | `enviado_a_domicilio` | ENVIADO A DOMICILIO (y variantes) |
-| `en_proceso` | IMPRESION, IMPRESION LISTA, TERMINADO, PEGADO, PEDIDO |
-| `requiere_revision` | vacío, VER EN GARANTIAS, VER EN PX PEND ESTUDIOS, NO PROCEDE, cualquier cosa desconocida |
+| `en_proceso` | vacío, IMPRESION, IMPRESION LISTA, TERMINADO, PEGADO, PEDIDO y **cualquier etapa desconocida** |
+| `requiere_revision` | VER EN…, VER EM…, NO PROCEDE, GARANTIA, CANCELADO, DEVOLUCION |
 
-Con el archivo actual: 92.7% de los pedidos obtienen respuesta directa y 7.3%
-van a un asesor.
+Las excepciones ganan a los prefijos: `VER EN SUCURSAL` es revisión, no
+"listo". En la hoja real, la ventana de 3 meses da 5,199 pedidos, 94.6% con
+teléfono y **0 que requieran revisión humana**.
 
-Importar (reemplaza la tabla completa; el Excel es la fuente de verdad):
+### Sincronizar desde el Google Sheet (recomendado)
+
+Se lee en vivo con la **misma cuenta de servicio de Calendar**, así que no hay
+credencial nueva que crear:
+
+1. En Google Cloud Console habilita también **Google Sheets API**.
+2. Comparte el Sheet de operaciones con el correo de la cuenta de servicio
+   (`algo@proyecto.iam.gserviceaccount.com`); basta permiso de **lector**.
+3. Copia el id del Sheet (lo que va entre `/d/` y `/edit` en la URL) en
+   `GOOGLE_SHEETS_PEDIDOS_ID`.
 
 ```bash
-uv run python scripts/importar_pedidos.py "PACIENTES SUPERVISION.xlsx"
+uv run python scripts/verificar_google.py     # diagnóstico de todo lo de Google
+uv run python scripts/sincronizar_pedidos.py  # sincroniza una vez
 ```
+
+En producción, un cron de n8n cada pocas horas:
+
+```
+POST /internal/pedidos/sincronizar
+Header: X-API-Key: <INTERNAL_API_KEY>
+Body (opcional): {"meses": 3}
+```
+
+Cada sincronización reemplaza la tabla completa. **Si la hoja no se puede
+leer, viene con otro encabezado o la ventana queda vacía, no se borra nada**:
+devuelve 503 y el bot sigue contestando con la última copia buena.
+
+### Respaldo: importar un .xlsx descargado
+
+```bash
+uv run --with openpyxl python scripts/importar_pedidos.py "PACIENTES SUPERVISION.xlsx" --meses 3
+```
+
+## El teléfono de la sucursal como última salida
+
+Ningún cliente debe quedarse sin a dónde ir. El bot da el teléfono de su
+sucursal cuando no encuentra su pedido, cuando el tema excede lo que puede
+resolver, y cuando ya escaló pero nadie lo atendió. Lo hace **además** de
+escalar, no en lugar de escalar.
+
+Los números viven en la columna `telefono` de `data/sucursales.csv`; para
+cargarlos o corregirlos, edita el CSV y corre `python
+scripts/seed_sucursales.py` (es upsert). `scripts/verificar_google.py` lista
+las sucursales que aún no tienen número.
 
 ## Conversaciones abandonadas
 

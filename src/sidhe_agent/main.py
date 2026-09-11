@@ -32,7 +32,7 @@ from .db.session import dispose_engine, get_engine, get_session
 from .graph.builder import build_graph
 from .memory.long_term import crear_extractor
 from .observability import configurar_logging, enmascarar_user_id
-from .services import conversaciones, metricas
+from .services import conversaciones, google_sheets, metricas
 from .services.transcription import transcribir_audio
 from .services.twilio_content import enviar_recordatorio
 from .tools.citas import fecha_legible
@@ -52,8 +52,10 @@ NOTA_ESCALAMIENTO_RESUELTO = (
 NOTA_NADIE_ATENDIO = (
     "[nota del sistema] Escalaste esta conversación pero ningún asesor la "
     "atendió en varias horas y vuelve a estar a tu cargo. Discúlpate una vez "
-    "por la demora, retoma la atención y resuelve lo que puedas tú mismo; "
-    "vuelve a escalar solo si de verdad no puedes."
+    "por la demora, retoma la atención y resuelve lo que puedas tú mismo. "
+    "Si el tema necesita sí o sí a una persona, dale el teléfono de su "
+    "sucursal (buscar_sucursal) para que la contacte directo, en vez de "
+    "volver a dejarlo esperando."
 )
 MENSAJE_ATORADO = (
     "Perdón, me enredé buscando esa información. ¿Me dices de nuevo qué "
@@ -653,3 +655,27 @@ async def escalamientos_pendientes(
         "horas_para_reactivar_bot": get_settings().horas_reactivar_bot,
         "escalamientos": pendientes,
     }
+
+
+class SolicitudSyncPedidos(BaseModel):
+    # Vacío = los meses configurados en PEDIDOS_MESES_HISTORIAL
+    meses: int | None = None
+
+
+@app.post("/internal/pedidos/sincronizar")
+async def sincronizar_pedidos(
+    datos: SolicitudSyncPedidos | None = None, x_api_key: str = Header(default="")
+) -> dict[str, Any]:
+    """Vuelve a leer la hoja STATUS del Google Sheet y reemplaza la tabla.
+
+    Pensado para un cron de n8n cada pocas horas. Si la hoja no se puede
+    leer devuelve 503 y la copia anterior queda intacta: el bot sigue
+    contestando con los datos de la última sincronización buena.
+    """
+    _validar_api_key_interna(x_api_key)
+    meses = datos.meses if datos else None
+    try:
+        return await google_sheets.sincronizar(meses)
+    except google_sheets.ErrorSincronizacion as exc:
+        logger.warning("sincronizacion_pedidos_fallida", error=str(exc))
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
