@@ -143,3 +143,19 @@ def test_resumen_cuenta_lo_que_se_guardo():
     assert datos["desde"] == "2026-08-01"
     assert datos["hasta"] == "2026-08-02"
     assert datos["por_categoria"] == {pedidos.LISTO: 1, pedidos.EN_PROCESO: 1}
+
+
+def test_la_sucursal_se_compara_con_tolerancia():
+    """La hoja dice PARQUE DELTA y el cliente dice 'Liverpool Delta'."""
+    assert pedidos.sucursal_compatible("Liverpool Delta", "PARQUE DELTA")
+    assert pedidos.sucursal_compatible("delta", "PARQUE DELTA")
+    assert pedidos.sucursal_compatible("Liverpool Satélite", "SATELITE")
+    assert pedidos.sucursal_compatible("Puebla", "ANGELOPOLIS PUEBLA")
+    assert pedidos.sucursal_compatible("SANTA FE", "Santa Fe")
+
+
+def test_la_tolerancia_no_confunde_sucursales_distintas():
+    assert not pedidos.sucursal_compatible("Polanco", "PERISUR")
+    assert not pedidos.sucursal_compatible("Liverpool", "PERISUR")
+    assert not pedidos.sucursal_compatible("", "PERISUR")
+    assert not pedidos.sucursal_compatible("Perisur", "")

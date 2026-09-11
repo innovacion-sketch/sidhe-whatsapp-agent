@@ -130,30 +130,42 @@ async def buscar_por_telefono(telefono: str) -> list[dict]:
     return [_a_dict(p) for p in filas]
 
 
+def sucursal_compatible(dicha: str, en_la_hoja: str) -> bool:
+    """¿El cliente se refiere a esta sucursal?
+
+    La hoja las nombra a su manera ("PARQUE DELTA", "GDLLAPERLA") y el
+    cliente dice otra ("Delta", "Liverpool Parque Delta"). Basta con que una
+    contenga a la otra, sin el "Liverpool" que llevan todas.
+    """
+    a = normalizar_texto(dicha).replace("LIVERPOOL", "").strip()
+    b = normalizar_texto(en_la_hoja).replace("LIVERPOOL", "").strip()
+    if not a or not b:
+        return False
+    return a in b or b in a
+
+
 async def buscar_por_nombre(nombre: str, sucursal: str) -> list[dict]:
     """Respaldo cuando el teléfono no está en la hoja.
 
-    Exige nombre Y sucursal, y solo devuelve resultados si el nombre coincide
-    completo: así el bot no expone el pedido de otra persona por una búsqueda
-    parcial.
+    Exige nombre Y sucursal, y el nombre tiene que coincidir COMPLETO: así el
+    bot no expone el pedido de otra persona por una búsqueda parcial. La
+    sucursal sí se compara con tolerancia, porque el cliente no tiene por qué
+    saber cómo la escribe operaciones.
     """
     nombre_norm = normalizar_texto(nombre)
-    sucursal_norm = normalizar_texto(sucursal)
-    if len(nombre_norm.split()) < 2 or not sucursal_norm:
+    if len(nombre_norm.split()) < 2 or not normalizar_texto(sucursal):
         return []
     async with get_session() as session:
         filas = (
             await session.execute(
                 select(Pedido)
-                .where(
-                    Pedido.nombre_normalizado == nombre_norm,
-                    func.upper(Pedido.sucursal) == sucursal_norm,
-                )
+                .where(Pedido.nombre_normalizado == nombre_norm)
                 .order_by(Pedido.fecha.desc().nullslast())
-                .limit(5)
+                .limit(20)
             )
         ).scalars().all()
-    return [_a_dict(p) for p in filas]
+    coinciden = [p for p in filas if sucursal_compatible(sucursal, p.sucursal)]
+    return [_a_dict(p) for p in coinciden[:5]]
 
 
 async def total() -> int:
