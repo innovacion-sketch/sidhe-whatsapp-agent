@@ -100,6 +100,15 @@ class Settings(BaseSettings):
     # entonces hay que sincronizar desde fuera con /internal/pedidos/sincronizar)
     pedidos_sincronizar_cada_horas: int = 2
 
+    # Meta: Instagram DM y Facebook Messenger. Cada red se activa sola al
+    # poner su token; sin token, ese canal simplemente no existe.
+    # El app secret valida la firma de los webhooks y el verify token es el
+    # que se teclea al dar de alta la URL en el panel de Meta.
+    meta_app_secret: str = ""
+    meta_verify_token: str = ""
+    meta_token_instagram: str = ""
+    meta_token_messenger: str = ""
+
     # n8n: webhook al que se avisa cada cita creada/cancelada (para Sheets).
     # Vacío = no se envía nada.
     n8n_webhook_citas: str = ""

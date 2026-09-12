@@ -20,6 +20,8 @@ def cliente(monkeypatch):
     app.state.adapter = WhatsAppTwilioAdapter(
         account_sid="ACtest", auth_token="token", from_number="whatsapp:+521563"
     )
+    # El arranque real registra un adaptador por canal; aqui se imita.
+    app.state.adapters = {app.state.adapter.canal: app.state.adapter}
     return TestClient(app)
 
 
@@ -93,3 +95,39 @@ def test_ventana_de_24h():
     assert conversaciones._ventana_abierta({"fecha": reciente.isoformat()}) is True
     assert conversaciones._ventana_abierta({"fecha": viejo.isoformat()}) is False
     assert conversaciones._ventana_abierta(None) is False
+
+
+def test_responder_por_instagram_usa_el_adaptador_de_instagram(cliente):
+    """Cada canal se contesta por su propia via, no por la de WhatsApp."""
+    from sidhe_agent.channels.meta import MetaAdapter
+
+    de_instagram = MetaAdapter("instagram", "TOKEN")
+    app.state.adapters["instagram"] = de_instagram
+    try:
+        with (
+            patch("sidhe_agent.main.conversaciones.tomar_control",
+                  AsyncMock(return_value=True)),
+            patch.object(de_instagram, "send", AsyncMock(return_value="mid.9")) as envio,
+            patch.object(app.state.adapter, "send", AsyncMock()) as envio_whatsapp,
+            patch("sidhe_agent.main._guardar_mensaje", AsyncMock()),
+        ):
+            r = cliente.post(
+                "/internal/conversaciones/instagram/IGSID_CLIENTE/responder",
+                json={"texto": "Te confirmo tu cita"},
+                headers={"X-API-Key": CLAVE},
+            )
+    finally:
+        del app.state.adapters["instagram"]
+
+    assert r.status_code == 200
+    envio.assert_awaited_once()
+    envio_whatsapp.assert_not_awaited()
+
+
+def test_no_se_puede_responder_por_un_canal_sin_adaptador(cliente):
+    r = cliente.post(
+        "/internal/conversaciones/messenger/PSID/responder",
+        json={"texto": "hola"},
+        headers={"X-API-Key": CLAVE},
+    )
+    assert r.status_code == 400

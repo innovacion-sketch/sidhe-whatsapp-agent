@@ -127,6 +127,10 @@ Notas de operación:
 | `GOOGLE_SHEETS_PEDIDOS_HOJA` | Pestaña con el estado de pedidos (default `STATUS`) |
 | `PEDIDOS_MESES_HISTORIAL` | Meses de pedidos que se guardan (default 3) |
 | `PEDIDOS_SINCRONIZAR_CADA_HORAS` | Cada cuánto relee la hoja el servicio (default 2; `0` = nunca) |
+| `META_APP_SECRET` | Secreto de la app de Meta: valida la firma de los webhooks |
+| `META_VERIFY_TOKEN` | Cadena que tú inventas y tecleas al dar de alta el webhook |
+| `META_TOKEN_INSTAGRAM` | Page access token de la cuenta de Instagram (vacío = canal apagado) |
+| `META_TOKEN_MESSENGER` | Page access token de la página de Facebook (vacío = canal apagado) |
 | `N8N_WEBHOOK_CITAS` | URL del webhook de n8n para citas (vacío = no se envía) |
 | `TZ` | `America/Mexico_City` |
 | `LOG_LEVEL` | `INFO` por default |
@@ -443,6 +447,47 @@ uv run python scripts/ingest_documents.py "data/docs/*.md"
   `dimensions=1024`) y `bge-m3` como stub para self-hosted. La dimensión es
   siempre 1024 (columna `vector(1024)`); cambiar de proveedor requiere
   re-ingestar el corpus.
+
+## Instagram DM y Facebook Messenger
+
+Las dos redes hablan el mismo protocolo (Messenger Platform), así que las
+atiende un solo adaptador — `channels/meta.py` — con un token por red. El
+núcleo no cambia: mismas FAQs, mismo agendado, misma consulta de pedidos,
+misma memoria. Las conversaciones caen en la misma bandeja del panel y el
+equipo contesta desde ahí, igual que en WhatsApp.
+
+Cada red se enciende sola al poner su token; sin token, ese canal no existe
+y un mensaje suyo solo se registra en el log.
+
+Alta del webhook en el panel de Meta:
+
+```
+URL de devolución de llamada:  https://TU-DOMINIO/webhooks/meta
+Token de verificación:         el que pongas en META_VERIFY_TOKEN
+Campos suscritos:              messages, messaging_postbacks
+```
+
+Meta llama primero con `GET` y un `hub.challenge` que el servicio devuelve
+tal cual; después manda los mensajes por `POST` firmados con
+`X-Hub-Signature-256`, que se valida contra `META_APP_SECRET` sobre el
+cuerpo **crudo**.
+
+Tres cosas de Meta que rompen estas integraciones si se ignoran, y que ya
+están resueltas:
+
+- **Ecos.** Meta devuelve nuestros propios mensajes marcados con `is_echo`.
+  Sin descartarlos, el bot se contesta a sí mismo en bucle.
+- **Reintentos.** Si tardamos en responder 200, Meta reenvía el evento; la
+  idempotencia va por el `mid` del mensaje, como el SID de Twilio.
+- **Límites distintos a WhatsApp.** La UI son *quick replies*: máximo 13 y
+  el título se corta a 20 caracteres (WhatsApp admite 24). El recorte se
+  hace en el adaptador, no en el agente.
+
+**El trámite con Meta es el camino largo.** Para leer DMs hace falta cuenta
+profesional de Instagram ligada a una página de Facebook, una app de Meta
+con permisos de mensajería y, para atender a usuarios que no son de prueba,
+App Review con verificación de negocio. Eso tarda semanas; el código ya está
+listo y esperando el token.
 
 ## Multicanal (estructura)
 

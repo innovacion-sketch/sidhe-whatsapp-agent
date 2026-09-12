@@ -7,6 +7,7 @@ API REST de Twilio (no TwiML).
 
 import asyncio
 import datetime
+import json
 import uuid
 from contextlib import AsyncExitStack, asynccontextmanager, suppress
 from pathlib import Path
@@ -26,6 +27,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, text
 
 from .channels.schemas import IncomingMessage, OutgoingMessage, UIElement
+from .channels import meta as canal_meta
 from .channels.whatsapp_twilio import WhatsAppTwilioAdapter, validar_firma
 from .config import get_settings
 from .db.models import Cita, Escalamiento, Mensaje, Slot, Sucursal
@@ -118,6 +120,15 @@ async def lifespan(app: FastAPI):
         auth_token=settings.twilio_auth_token,
         from_number=settings.twilio_whatsapp_from,
     )
+    # Un adaptador por canal. Instagram y Messenger solo aparecen si tienen
+    # token: sin el tramite de Meta terminado, esos canales no existen.
+    app.state.adapters = {app.state.adapter.canal: app.state.adapter}
+    app.state.adapters.update(
+        canal_meta.adaptadores_configurados(
+            settings.meta_token_instagram, settings.meta_token_messenger
+        )
+    )
+    logger.info("canales_activos", canales=sorted(app.state.adapters))
     # La hoja de pedidos se relee sola: sin esto habria que empujarla desde
     # n8n y una sincronizacion olvidada es un cliente al que le decimos que
     # sus plantillas siguen en fabricacion cuando ya estan en la sucursal.
@@ -289,7 +300,8 @@ async def procesar_mensaje(app: FastAPI, entrante: IncomingMessage) -> None:
         ui_pendiente = resultado.get("ui_pendiente")
         ui = UIElement(**ui_pendiente) if ui_pendiente else None
         salida = OutgoingMessage(texto=texto, ui=ui)
-        sid = await app.state.adapter.send(entrante.user_id, salida)
+        adaptador = _adaptador(app, entrante.canal) or app.state.adapter
+        sid = await adaptador.send(entrante.user_id, salida)
         await _guardar_mensaje(
             "out",
             entrante.canal,
@@ -303,7 +315,7 @@ async def procesar_mensaje(app: FastAPI, entrante: IncomingMessage) -> None:
         # El agente se atoro en un bucle de tools: no dejar al cliente sin salida.
         log.exception("limite_de_pasos_agotado")
         try:
-            await app.state.adapter.send(
+            await (_adaptador(app, entrante.canal) or app.state.adapter).send(
                 entrante.user_id, OutgoingMessage(texto=MENSAJE_ATORADO)
             )
         except Exception:
@@ -312,7 +324,7 @@ async def procesar_mensaje(app: FastAPI, entrante: IncomingMessage) -> None:
     except Exception:
         log.exception("error_procesando_mensaje")
         try:
-            await app.state.adapter.send(
+            await (_adaptador(app, entrante.canal) or app.state.adapter).send(
                 entrante.user_id, OutgoingMessage(texto=MENSAJE_ERROR_CLIENTE)
             )
         except Exception:
@@ -352,6 +364,11 @@ async def webhook_twilio_whatsapp(
     )
     background_tasks.add_task(procesar_mensaje, request.app, entrante)
     return Response(content="<Response/>", media_type="application/xml")
+
+
+def _adaptador(app: FastAPI, canal: str):
+    """El adaptador de ese canal, o None si no está configurado."""
+    return getattr(app.state, "adapters", {}).get(canal)
 
 
 def _validar_api_key_interna(x_api_key: str) -> None:
@@ -619,7 +636,8 @@ async def responder_conversacion(
     texto = datos.texto.strip()
     if not texto:
         raise HTTPException(status_code=400, detail="texto vacío")
-    if canal != app.state.adapter.canal:
+    adaptador = _adaptador(app, canal)
+    if adaptador is None:
         raise HTTPException(
             status_code=400,
             detail=f"el canal '{canal}' aún no tiene adaptador de envío",
@@ -627,7 +645,7 @@ async def responder_conversacion(
 
     pausado_ahora = await conversaciones.tomar_control(canal, user_id)
     try:
-        sid = await app.state.adapter.send(user_id, OutgoingMessage(texto=texto))
+        sid = await adaptador.send(user_id, OutgoingMessage(texto=texto))
     except Exception as exc:
         logger.exception("error_enviando_respuesta_humana")
         raise HTTPException(
@@ -693,3 +711,78 @@ async def sincronizar_pedidos(
     except google_sheets.ErrorSincronizacion as exc:
         logger.warning("sincronizacion_pedidos_fallida", error=str(exc))
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get("/webhooks/meta")
+async def verificar_webhook_meta(request: Request) -> Response:
+    """Meta llama esta URL una sola vez, al dar de alta el webhook.
+
+    Hay que devolverle textualmente el hub.challenge que manda; si no, el
+    panel de Meta no deja guardar la URL.
+    """
+    parametros = request.query_params
+    esperado = get_settings().meta_verify_token
+    if (
+        esperado
+        and parametros.get("hub.mode") == "subscribe"
+        and parametros.get("hub.verify_token") == esperado
+    ):
+        logger.info("webhook_meta_verificado")
+        return Response(
+            content=parametros.get("hub.challenge", ""), media_type="text/plain"
+        )
+    logger.warning("verificacion_meta_rechazada")
+    raise HTTPException(status_code=403, detail="verify token inválido")
+
+
+@app.post("/webhooks/meta")
+async def webhook_meta(
+    request: Request, background_tasks: BackgroundTasks
+) -> Response:
+    """Mensajes de Instagram DM y Facebook Messenger.
+
+    Un mismo POST puede traer varios eventos de varias conversaciones. Se
+    contesta 200 siempre que la firma sea buena: si tardamos o fallamos, Meta
+    reintenta y el cliente recibe la respuesta duplicada.
+    """
+    settings = get_settings()
+    cuerpo = await request.body()
+    if not canal_meta.validar_firma(
+        cuerpo, request.headers.get("X-Hub-Signature-256", ""), settings.meta_app_secret
+    ):
+        logger.warning("firma_meta_invalida")
+        raise HTTPException(status_code=403, detail="Firma de Meta inválida")
+
+    try:
+        payload = json.loads(cuerpo)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="cuerpo no es JSON") from exc
+
+    for canal, evento in canal_meta.desglosar(payload):
+        adaptador = _adaptador(request.app, canal)
+        if adaptador is None:
+            logger.warning("mensaje_de_canal_sin_token", canal=canal)
+            continue
+
+        entrante = adaptador.parse_incoming(evento)
+        if not entrante.user_id:
+            continue
+        # Meta reintenta: idempotencia por el mid del mensaje.
+        if entrante.message_sid and await _mensaje_ya_procesado(
+            entrante.message_sid
+        ):
+            logger.info("webhook_duplicado_ignorado", mid=entrante.message_sid)
+            continue
+
+        await _guardar_mensaje(
+            "in",
+            entrante.canal,
+            entrante.user_id,
+            entrante.tipo,
+            entrante.contenido,
+            item_id=entrante.item_id,
+            twilio_sid=entrante.message_sid,
+        )
+        background_tasks.add_task(procesar_mensaje, request.app, entrante)
+
+    return Response(status_code=200)
