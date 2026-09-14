@@ -395,18 +395,62 @@ no, bot y asesor contestarían al mismo cliente. El botón *Devolver al bot* lo
 reactiva. La cabecera avisa si la ventana de 24h de WhatsApp sigue abierta;
 fuera de ella WhatsApp rechaza el texto libre y el panel lo dice.
 
+#### Colores y filtros
+
+Cada conversación tiene un estado, y **rojo significa "alguien te está
+esperando ahorita"**:
+
+| Estado | Color | Cuándo |
+|---|---|---|
+| Esperando asesor | rojo | El bot escaló y ningún asesor ha contestado, **o** el cliente volvió a escribir después de la última respuesta del asesor |
+| Atendida | verde | Hay escalamiento y la última palabra la tiene el asesor |
+| Cerrada | verde | Un asesor le dio *Cerrar conversación* |
+| Con el bot | sin color | No hay escalamiento pendiente |
+
+El estado no se guarda en ningún lado: se calcula de los mensajes, los
+escalamientos y los cierres (`services/conversaciones.calcular_estado`). Por
+eso nunca se desincroniza — una conversación cerrada se reabre sola cuando el
+cliente vuelve a escribir, y una atendida regresa a rojo si el cliente
+contesta. Los filtros muestran cuántas hay de cada estado, la pestaña lleva
+una burbuja roja con las que esperan, y la bandeja se refresca sola cada 20 s.
+
+#### Cerrar conversación
+
+Da la conversación por resuelta: atiende los escalamientos pendientes, el bot
+vuelve a quedar a cargo y el agente recibe una nota para tratar el siguiente
+mensaje del cliente como una consulta nueva, sin retomar el tema anterior.
+**No le manda nada al cliente**; para despedirse está `/cierre`.
+
+#### Respuestas rápidas
+
+La pestaña **Respuestas rápidas** administra hasta 100 mensajes ya
+redactados. En la caja de respuesta, escribir `/` abre el selector: se filtra
+tecleando (por atajo o por texto, sin importar acentos), ↑↓ para elegir,
+Enter o Tab para insertar, Esc para cerrar. El botón ⚡ lo abre sin escribir.
+La `/` solo cuenta al inicio o después de un espacio, para que un `1/2` o una
+URL no lo abran.
+
+El atajo se normaliza al guardar (`/Garantía Plantillas` →
+`garantia-plantillas`). La migración 0004 trae 19 respuestas iniciales
+sacadas de las FAQs aprobadas, **sin precios a propósito**: cambian, y tenerlos
+en dos lugares garantiza que uno quede desactualizado.
+
 Endpoints (todos con `X-API-Key`):
 
 ```
-GET  /internal/conversaciones?buscar=&limite=50
-GET  /internal/conversaciones/{canal}/{user_id}
-POST /internal/conversaciones/{canal}/{user_id}/responder        {"texto": "..."}
-POST /internal/conversaciones/{canal}/{user_id}/devolver-al-bot
+GET    /internal/conversaciones?buscar=&limite=50&estado=
+GET    /internal/conversaciones/{canal}/{user_id}
+POST   /internal/conversaciones/{canal}/{user_id}/responder        {"texto": "..."}
+POST   /internal/conversaciones/{canal}/{user_id}/devolver-al-bot
+POST   /internal/conversaciones/{canal}/{user_id}/cerrar
+GET    /internal/respuestas-rapidas
+POST   /internal/respuestas-rapidas                                 {"atajo", "texto"}
+PUT    /internal/respuestas-rapidas/{id}                            {"atajo", "texto"}
+DELETE /internal/respuestas-rapidas/{id}
 ```
 
-Enviar solo funciona en canales con adaptador (hoy WhatsApp); en Instagram o
-Facebook el endpoint responde 400 explicando por qué, hasta que exista el
-adaptador de Chatwoot.
+`estado` acepta `esperando_asesor`, `atendida`, `cerrada` o `bot`; vacío son
+todas.
 
 Para revisar el diseño sin base de datos (métricas y chats de ejemplo):
 

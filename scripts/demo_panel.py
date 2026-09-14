@@ -1,18 +1,23 @@
-"""Sirve el panel con metricas de ejemplo para revisarlo sin base de datos.
+"""Sirve el panel con datos de ejemplo para revisarlo sin base de datos.
 
-Solo para desarrollo: no toca Postgres ni el agente.
+Solo para desarrollo: no toca Postgres ni el agente. Incluye una conversación
+en cada estado de la bandeja (esperando asesor, atendida, cerrada, con el
+bot) y respuestas rápidas en memoria que se pueden crear, editar y borrar.
 
-Uso: uv run python scripts/demo_panel.py
+Uso: uv run python scripts/demo_panel.py   (clave: cualquiera)
 """
 
+import datetime
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "alembic" / "versions"))
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
 
 RUTA_PANEL = Path(__file__).parent.parent / "src" / "sidhe_agent" / "panel" / "index.html"
 
@@ -45,15 +50,75 @@ EJEMPLO = {
     ],
     "proximas_citas": [
         {"folio": 168, "cliente": "Ana Lopez", "sucursal": "Liverpool Perisur",
-         "fecha": "2026-09-05", "hora": "11:00", "canal": "whatsapp"},
+         "fecha": "2026-09-15", "hora": "11:00", "canal": "whatsapp"},
         {"folio": 169, "cliente": "Beto Ramirez", "sucursal": "Liverpool Polanco",
-         "fecha": "2026-09-05", "hora": "13:00", "canal": "instagram"},
-        {"folio": 170, "cliente": "Carla Diaz", "sucursal": "Liverpool Satelite",
-         "fecha": "2026-09-06", "hora": "16:00", "canal": "whatsapp"},
+         "fecha": "2026-09-15", "hora": "13:00", "canal": "instagram"},
     ],
     "primera_respuesta_seg": 4.6,
     "conversion": 40.8,
 }
+
+
+def hace(minutos: int) -> str:
+    momento = datetime.datetime.now() - datetime.timedelta(minutes=minutos)
+    return momento.isoformat(timespec="seconds")
+
+
+# Una conversación por estado, con su historial
+CONVERSACIONES = {
+    "+5215512232247": {
+        "canal": "whatsapp", "estado": "esperando_asesor", "esperando_desde": hace(25),
+        "mensajes": [
+            ("in", "texto", "Hola, compré plantillas en Perisur hace 3 semanas", 30),
+            ("out", "texto", "¡Hola! Déjame buscar tu pedido.", 29),
+            ("in", "texto", "Me lastiman del lado derecho, ¿me las pueden ajustar?", 27),
+            ("out", "texto", "Entiendo. Te comunico con un asesor para revisar el ajuste; te contactará por este mismo chat.", 25),
+        ],
+    },
+    "ig:andres.bautista": {
+        "canal": "instagram", "estado": "esperando_asesor", "esperando_desde": hace(140),
+        "mensajes": [
+            ("in", "texto", "¿Tienen convenio con mi empresa?", 150),
+            ("out", "texto", "Te comunico con un asesor para revisarlo.", 140),
+        ],
+    },
+    "+5215642934582": {
+        "canal": "whatsapp", "estado": "atendida", "esperando_desde": None,
+        "mensajes": [
+            ("in", "texto", "¿Ya están mis plantillas?", 90),
+            ("out", "texto", "Tu pedido necesita revisión, te paso con un asesor.", 89),
+            ("out", "humano", "Hola, soy Laura. Ya revisé: llegan a Polanco el jueves.", 60),
+        ],
+    },
+    "+5215533114455": {
+        "canal": "whatsapp", "estado": "cerrada", "esperando_desde": None,
+        "mensajes": [
+            ("in", "texto", "¿Cómo se limpian?", 300),
+            ("out", "humano", "Se limpian con un paño húmedo y jabón suave.", 290),
+            ("in", "texto", "¡Gracias!", 288),
+        ],
+    },
+    "+5215599887766": {
+        "canal": "whatsapp", "estado": "bot", "esperando_desde": None,
+        "mensajes": [
+            ("in", "texto", "Quiero agendar", 12),
+            ("out", "interactivo", "¿En qué ciudad, zona o plaza te queda más cerca?", 12),
+            ("in", "seleccion_interactiva", "Polanco", 11),
+        ],
+    },
+}
+
+
+def _resumen(user_id: str, datos: dict) -> dict:
+    ultimo = datos["mensajes"][-1]
+    return {
+        "canal": datos["canal"], "user_id": user_id,
+        "ultimo_mensaje": ultimo[2], "ultima_direccion": ultimo[0],
+        "ultima_fecha": hace(ultimo[3]), "mensajes": len(datos["mensajes"]),
+        "estado": datos["estado"], "esperando_desde": datos["esperando_desde"],
+        "bot_pausado": datos["estado"] in ("esperando_asesor", "atendida"),
+    }
+
 
 app = FastAPI()
 
@@ -68,58 +133,122 @@ async def met(dias: int = 30) -> dict:
     return {**EJEMPLO, "dias": dias}
 
 
-CONVERSACIONES = [
-    {"canal": "whatsapp", "user_id": "+5215642934582",
-     "ultimo_mensaje": "Confirmar", "ultima_direccion": "in",
-     "ultima_fecha": "2026-09-04T17:42:00", "mensajes": 18, "bot_pausado": False},
-    {"canal": "whatsapp", "user_id": "+5215512232247",
-     "ultimo_mensaje": "Un asesor te contactara en breve",
-     "ultima_direccion": "out", "ultima_fecha": "2026-09-04T16:10:00",
-     "mensajes": 9, "bot_pausado": True},
-    {"canal": "instagram", "user_id": "ig:andres.bautista",
-     "ultimo_mensaje": "Informacion para comprar plantillas",
-     "ultima_direccion": "in", "ultima_fecha": "2026-09-04T12:03:00",
-     "mensajes": 4, "bot_pausado": False},
-]
-
-HISTORIAL = {
-    "canal": "whatsapp", "user_id": "+5215642934582",
-    "bot_pausado": False, "ventana_abierta": True,
-    "mensajes": [
-        {"direccion": "in", "tipo": "texto", "contenido": "Hola",
-         "fecha": "2026-09-04T17:30:00"},
-        {"direccion": "out", "tipo": "texto",
-         "contenido": "Hola! Bienvenido a Sidhe Group. En que te ayudo?",
-         "fecha": "2026-09-04T17:30:12"},
-        {"direccion": "in", "tipo": "audio",
-         "contenido": "[transcripcion] cuanto cuestan las plantillas",
-         "fecha": "2026-09-04T17:31:00"},
-        {"direccion": "out", "tipo": "texto",
-         "contenido": "Estandar 2199, deportiva 2499, express 2899 y sandalias 3799.",
-         "fecha": "2026-09-04T17:31:20"},
-        {"direccion": "in", "tipo": "seleccion_interactiva",
-         "contenido": "Confirmar", "fecha": "2026-09-04T17:42:00"},
-        {"direccion": "out", "tipo": "humano",
-         "contenido": "Te esperamos manana, cualquier duda aqui estoy.",
-         "fecha": "2026-09-04T17:45:00"},
-    ],
-}
-
-
 @app.get("/internal/conversaciones")
-async def conversaciones(buscar: str = "", limite: int = 50) -> dict:
-    datos = [c for c in CONVERSACIONES if buscar.lower() in c["user_id"].lower()]
-    return {"conversaciones": datos}
+async def conversaciones(buscar: str = "", limite: int = 50, estado: str = "") -> dict:
+    todas = [
+        _resumen(u, d) for u, d in CONVERSACIONES.items()
+        if buscar.lower() in u.lower()
+    ]
+    todas.sort(key=lambda c: c["ultima_fecha"], reverse=True)
+    conteos = {e: 0 for e in ("esperando_asesor", "atendida", "cerrada", "bot")}
+    for c in todas:
+        conteos[c["estado"]] += 1
+    conteos["todas"] = len(todas)
+    visibles = [c for c in todas if not estado or c["estado"] == estado]
+    return {"conversaciones": visibles[:limite], "conteos": conteos}
 
 
 @app.get("/internal/conversaciones/{canal}/{user_id}")
 async def conversacion(canal: str, user_id: str) -> dict:
-    return {**HISTORIAL, "canal": canal, "user_id": user_id}
+    datos = CONVERSACIONES[user_id]
+    return {
+        **_resumen(user_id, datos),
+        "ventana_abierta": True,
+        "mensajes": [
+            {"direccion": d, "tipo": t, "contenido": c, "fecha": hace(m)}
+            for d, t, c, m in datos["mensajes"]
+        ],
+    }
+
+
+class Respuesta(BaseModel):
+    texto: str
 
 
 @app.post("/internal/conversaciones/{canal}/{user_id}/responder")
-async def responder(canal: str, user_id: str) -> dict:
+async def responder(canal: str, user_id: str, datos: Respuesta) -> dict:
+    conv = CONVERSACIONES[user_id]
+    conv["mensajes"].append(("out", "humano", datos.texto, 0))
+    conv["estado"], conv["esperando_desde"] = "atendida", None
     return {"ok": True, "bot_pausado": True}
+
+
+@app.post("/internal/conversaciones/{canal}/{user_id}/cerrar")
+async def cerrar(canal: str, user_id: str) -> dict:
+    CONVERSACIONES[user_id]["estado"] = "cerrada"
+    CONVERSACIONES[user_id]["esperando_desde"] = None
+    return {"ok": True, "estado": "cerrada"}
+
+
+@app.post("/internal/conversaciones/{canal}/{user_id}/devolver-al-bot")
+async def devolver(canal: str, user_id: str) -> dict:
+    CONVERSACIONES[user_id]["estado"] = "bot"
+    CONVERSACIONES[user_id]["esperando_desde"] = None
+    return {"ok": True}
+
+
+# --- respuestas rápidas en memoria, con la misma semilla que la migración ---
+
+from sidhe_agent.services.respuestas_rapidas import normalizar_atajo  # noqa: E402
+
+import importlib.util  # noqa: E402
+
+_spec = importlib.util.spec_from_file_location(
+    "semilla", Path(__file__).parent.parent / "alembic" / "versions" / "0004_bandeja_asesores.py"
+)
+_semilla = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_semilla)
+
+RESPUESTAS = {
+    i + 1: {"id": i + 1, "atajo": a, "texto": t}
+    for i, (a, t) in enumerate(_semilla.RESPUESTAS_INICIALES)
+}
+
+
+class DatosRespuesta(BaseModel):
+    atajo: str
+    texto: str
+
+
+def _validar(datos: DatosRespuesta, propio: int | None = None) -> tuple[str, str]:
+    atajo, texto = normalizar_atajo(datos.atajo), datos.texto.strip()
+    if not atajo:
+        raise HTTPException(400, "El atajo no puede quedar vacío (usa letras o números).")
+    if not texto:
+        raise HTTPException(400, "El mensaje no puede quedar vacío.")
+    if any(r["atajo"] == atajo and r["id"] != propio for r in RESPUESTAS.values()):
+        raise HTTPException(409, f"Ya existe una respuesta con el atajo /{atajo}.")
+    return atajo, texto
+
+
+@app.get("/internal/respuestas-rapidas")
+async def listar_respuestas() -> dict:
+    ordenadas = sorted(RESPUESTAS.values(), key=lambda r: r["atajo"])
+    return {"respuestas": ordenadas, "maximo": 100}
+
+
+@app.post("/internal/respuestas-rapidas", status_code=201)
+async def crear_respuesta(datos: DatosRespuesta) -> dict:
+    atajo, texto = _validar(datos)
+    nuevo_id = max(RESPUESTAS, default=0) + 1
+    RESPUESTAS[nuevo_id] = {"id": nuevo_id, "atajo": atajo, "texto": texto}
+    return RESPUESTAS[nuevo_id]
+
+
+@app.put("/internal/respuestas-rapidas/{respuesta_id}")
+async def editar_respuesta(respuesta_id: int, datos: DatosRespuesta) -> dict:
+    if respuesta_id not in RESPUESTAS:
+        raise HTTPException(404, "Esa respuesta ya no existe.")
+    atajo, texto = _validar(datos, respuesta_id)
+    RESPUESTAS[respuesta_id].update(atajo=atajo, texto=texto)
+    return RESPUESTAS[respuesta_id]
+
+
+@app.delete("/internal/respuestas-rapidas/{respuesta_id}")
+async def borrar_respuesta(respuesta_id: int) -> dict:
+    if RESPUESTAS.pop(respuesta_id, None) is None:
+        raise HTTPException(404, "Esa respuesta ya no existe.")
+    return {"ok": True}
 
 
 if __name__ == "__main__":

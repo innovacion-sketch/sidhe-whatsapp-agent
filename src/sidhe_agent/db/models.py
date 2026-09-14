@@ -191,3 +191,39 @@ class Pedido(Base):
     importado_en: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class RespuestaRapida(Base):
+    """Mensaje ya redactado que el asesor inserta escribiendo /atajo."""
+
+    __tablename__ = "respuestas_rapidas"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    atajo: Mapped[str] = mapped_column(String(30), unique=True, nullable=False)
+    texto: Mapped[str] = mapped_column(Text, nullable=False)
+    creado_en: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    actualizado_en: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class CierreConversacion(Base):
+    """Un asesor dio la conversación por resuelta.
+
+    No se guarda un estado "cerrada" en ningún lado: una conversación está
+    cerrada si su último cierre es posterior al último mensaje del cliente.
+    Así, cuando el cliente vuelve a escribir, se reabre sola sin que nadie
+    tenga que acordarse de cambiar nada.
+    """
+
+    __tablename__ = "cierres_conversacion"
+    __table_args__ = (Index("ix_cierres_canal_user", "canal", "user_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    canal: Mapped[str] = mapped_column(String(30), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(40), nullable=False)
+    cerrada_en: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

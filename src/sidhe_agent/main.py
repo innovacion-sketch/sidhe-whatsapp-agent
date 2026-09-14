@@ -36,6 +36,7 @@ from .graph.builder import build_graph
 from .memory.long_term import crear_extractor
 from .observability import configurar_logging, enmascarar_user_id
 from .services import agenda, conversaciones, google_sheets, metricas
+from .services import respuestas_rapidas
 from .services.transcription import transcribir_audio
 from .services.twilio_content import enviar_recordatorio
 from .tools.citas import fecha_legible
@@ -51,6 +52,12 @@ NOTA_ESCALAMIENTO_RESUELTO = (
     "y la conversación vuelve a estar a tu cargo. Retoma la atención con "
     "normalidad: si el cliente pide algo que puedes resolver (como agendar "
     "una cita), hazlo tú mismo y no digas que hay un asesor en camino."
+)
+NOTA_CONVERSACION_CERRADA = (
+    "[nota del sistema] Un asesor marcó esta conversación como resuelta y "
+    "vuelve a estar a tu cargo. Si el cliente escribe de nuevo, trátalo como "
+    "una consulta nueva: salúdalo y pregúntale en qué le puedes ayudar, sin "
+    "retomar el tema anterior a menos que él lo mencione."
 )
 NOTA_NADIE_ATENDIO = (
     "[nota del sistema] Escalaste esta conversación pero ningún asesor la "
@@ -481,6 +488,26 @@ class ResolverEscalamiento(BaseModel):
     canal: str = "whatsapp"
 
 
+async def _devolver_al_agente(canal: str, user_id: str, nota: str) -> bool:
+    """Reanuda el hilo pausado y le deja al agente una nota de contexto.
+
+    Sin la nota el historial sigue diciendo "ya te escalé" y el agente se
+    niega a retomar el caso. Se agrega al hilo SIN invocar el grafo, para no
+    enviarle un mensaje al cliente por nuestra cuenta. Devuelve True si había
+    un hilo en pausa que reanudar.
+    """
+    config = {"configurable": {"thread_id": f"{canal}:{user_id}"}}
+    snapshot = await app.state.graph.aget_state(config)
+    reanudado = False
+    if any(t.interrupts for t in snapshot.tasks):
+        await app.state.graph.ainvoke(Command(resume="atendido"), config)
+        reanudado = True
+    await app.state.graph.aupdate_state(
+        config, {"messages": [HumanMessage(content=nota)], "escalado": False}
+    )
+    return reanudado
+
+
 @app.post("/internal/escalamientos/resolver")
 async def resolver_escalamiento(
     datos: ResolverEscalamiento, x_api_key: str = Header(default="")
@@ -507,22 +534,8 @@ async def resolver_escalamiento(
             escalamiento.estado = "atendido"
         await session.commit()
 
-    config = {"configurable": {"thread_id": f"{datos.canal}:{datos.user_id}"}}
-    snapshot = await app.state.graph.aget_state(config)
-    reanudado = False
-    if any(t.interrupts for t in snapshot.tasks):
-        await app.state.graph.ainvoke(Command(resume="atendido"), config)
-        reanudado = True
-
-    # Sin esta nota el historial sigue diciendo "ya te escale" y el agente se
-    # niega a retomar el caso. Se agrega al hilo SIN invocar el grafo, para no
-    # enviarle un mensaje al cliente por nuestra cuenta.
-    await app.state.graph.aupdate_state(
-        config,
-        {
-            "messages": [HumanMessage(content=NOTA_ESCALAMIENTO_RESUELTO)],
-            "escalado": False,
-        },
+    reanudado = await _devolver_al_agente(
+        datos.canal, datos.user_id, NOTA_ESCALAMIENTO_RESUELTO
     )
 
     return {
@@ -612,11 +625,17 @@ class RespuestaHumana(BaseModel):
 
 @app.get("/internal/conversaciones")
 async def listar_conversaciones(
-    buscar: str = "", limite: int = 50, x_api_key: str = Header(default="")
+    buscar: str = "",
+    limite: int = 50,
+    estado: str = "",
+    x_api_key: str = Header(default=""),
 ) -> dict[str, Any]:
-    """Bandeja: conversaciones ordenadas por actividad reciente."""
+    """Bandeja: conversaciones por actividad reciente, con su estado.
+
+    `estado`: esperando_asesor | atendida | cerrada | bot. Vacío = todas.
+    """
     _validar_api_key_interna(x_api_key)
-    return {"conversaciones": await conversaciones.listar(buscar, limite)}
+    return await conversaciones.listar(buscar, limite, estado)
 
 
 @app.get("/internal/conversaciones/{canal}/{user_id}")
@@ -794,3 +813,100 @@ async def webhook_meta(
         background_tasks.add_task(procesar_mensaje, request.app, entrante)
 
     return Response(status_code=200)
+
+
+@app.post("/internal/conversaciones/{canal}/{user_id}/cerrar")
+async def cerrar_conversacion(
+    canal: str, user_id: str, x_api_key: str = Header(default="")
+) -> dict[str, Any]:
+    """El asesor da la conversación por resuelta.
+
+    Queda en verde, el bot vuelve a quedar a cargo y el agente recibe una nota
+    para tratar el siguiente mensaje del cliente como una consulta nueva. No
+    se le manda nada al cliente: para despedirse está la respuesta rápida
+    /cierre. Si el cliente vuelve a escribir, la conversación se reabre sola.
+    """
+    _validar_api_key_interna(x_api_key)
+    resueltos = await conversaciones.cerrar(canal, user_id)
+    try:
+        reanudado = await _devolver_al_agente(canal, user_id, NOTA_CONVERSACION_CERRADA)
+        nota_agregada = True
+    except Exception:
+        # El cierre ya quedó guardado, que es lo que ve el asesor; si el hilo
+        # no acepta la nota, el agente solo pierde ese contexto.
+        logger.exception("error_avisando_cierre_al_agente")
+        reanudado, nota_agregada = False, False
+
+    logger.info(
+        "conversacion_cerrada",
+        user_id=enmascarar_user_id(user_id),
+        canal=canal,
+        escalamientos_resueltos=resueltos,
+    )
+    return {
+        "ok": True,
+        "estado": conversaciones.CERRADA,
+        "escalamientos_resueltos": resueltos,
+        "thread_reanudado": reanudado,
+        "nota_agregada": nota_agregada,
+    }
+
+
+class DatosRespuestaRapida(BaseModel):
+    atajo: str
+    texto: str
+
+
+def _error_respuesta(exc: respuestas_rapidas.ErrorRespuesta) -> HTTPException:
+    codigo = 409 if isinstance(exc, respuestas_rapidas.AtajoDuplicado) else 400
+    return HTTPException(status_code=codigo, detail=str(exc))
+
+
+@app.get("/internal/respuestas-rapidas")
+async def listar_respuestas_rapidas(
+    x_api_key: str = Header(default=""),
+) -> dict[str, Any]:
+    _validar_api_key_interna(x_api_key)
+    return {
+        "respuestas": await respuestas_rapidas.listar(),
+        "maximo": respuestas_rapidas.MAX_RESPUESTAS,
+    }
+
+
+@app.post("/internal/respuestas-rapidas", status_code=201)
+async def crear_respuesta_rapida(
+    datos: DatosRespuestaRapida, x_api_key: str = Header(default="")
+) -> dict[str, Any]:
+    _validar_api_key_interna(x_api_key)
+    try:
+        return await respuestas_rapidas.crear(datos.atajo, datos.texto)
+    except respuestas_rapidas.ErrorRespuesta as exc:
+        raise _error_respuesta(exc) from exc
+
+
+@app.put("/internal/respuestas-rapidas/{respuesta_id}")
+async def actualizar_respuesta_rapida(
+    respuesta_id: int,
+    datos: DatosRespuestaRapida,
+    x_api_key: str = Header(default=""),
+) -> dict[str, Any]:
+    _validar_api_key_interna(x_api_key)
+    try:
+        actualizada = await respuestas_rapidas.actualizar(
+            respuesta_id, datos.atajo, datos.texto
+        )
+    except respuestas_rapidas.ErrorRespuesta as exc:
+        raise _error_respuesta(exc) from exc
+    if actualizada is None:
+        raise HTTPException(status_code=404, detail="Esa respuesta ya no existe.")
+    return actualizada
+
+
+@app.delete("/internal/respuestas-rapidas/{respuesta_id}")
+async def borrar_respuesta_rapida(
+    respuesta_id: int, x_api_key: str = Header(default="")
+) -> dict[str, Any]:
+    _validar_api_key_interna(x_api_key)
+    if not await respuestas_rapidas.borrar(respuesta_id):
+        raise HTTPException(status_code=404, detail="Esa respuesta ya no existe.")
+    return {"ok": True}

@@ -34,15 +34,27 @@ def test_bandeja_exige_clave(cliente):
 
 
 def test_listar_conversaciones(cliente):
-    falsas = [{
-        "canal": "whatsapp", "user_id": USER, "ultimo_mensaje": "hola",
-        "ultima_direccion": "in", "ultima_fecha": "2026-09-04T10:00:00",
-        "mensajes": 12, "bot_pausado": False,
-    }]
-    with patch("sidhe_agent.main.conversaciones.listar", AsyncMock(return_value=falsas)):
-        r = cliente.get("/internal/conversaciones", headers={"X-API-Key": CLAVE})
+    falsas = {
+        "conversaciones": [{
+            "canal": "whatsapp", "user_id": USER, "ultimo_mensaje": "hola",
+            "ultima_direccion": "in", "ultima_fecha": "2026-09-04T10:00:00",
+            "mensajes": 12, "estado": "esperando_asesor",
+            "esperando_desde": "2026-09-04T10:00:00", "bot_pausado": True,
+        }],
+        "conteos": {"esperando_asesor": 1, "atendida": 0, "cerrada": 0,
+                    "bot": 0, "todas": 1},
+    }
+    with patch(
+        "sidhe_agent.main.conversaciones.listar", AsyncMock(return_value=falsas)
+    ) as listar:
+        r = cliente.get(
+            "/internal/conversaciones?estado=esperando_asesor",
+            headers={"X-API-Key": CLAVE},
+        )
     assert r.status_code == 200
     assert r.json()["conversaciones"][0]["user_id"] == USER
+    assert r.json()["conteos"]["esperando_asesor"] == 1
+    listar.assert_awaited_once_with("", 50, "esperando_asesor")
 
 
 def test_responder_envia_y_silencia_al_bot(cliente):

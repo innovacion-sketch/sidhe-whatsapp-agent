@@ -9,6 +9,8 @@
     --fondo: #0f1115; --tarjeta: #181b22; --borde: #262b36;
     --texto: #e6e9ef; --suave: #9aa3b2; --azul: #3b82f6; --rojo: #ef4444;
     --verde: #22c55e; --ambar: #f59e0b;
+    --rojo-fondo: rgba(239, 68, 68, .09); --rojo-texto: #fca5a5;
+    --verde-fondo: rgba(34, 197, 94, .07); --verde-texto: #86efac;
   }
   * { box-sizing: border-box; }
   /* display:grid en main y .bandeja gana sobre el atributo hidden */
@@ -24,14 +26,22 @@
     border: 1px solid var(--borde); border-radius: 8px; padding: 8px 12px;
     font-size: 14px; }
   button { cursor: pointer; }
+  button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+    outline: 2px solid var(--azul); outline-offset: 1px; }
   button.primario { background: var(--azul); border-color: var(--azul);
                     color: #fff; font-weight: 600; }
   button.primario:disabled { opacity: .5; cursor: not-allowed; }
+  button.discreto { background: none; border-color: transparent; color: var(--suave); }
+  button.discreto:hover { color: var(--texto); border-color: var(--borde); }
   nav { display: flex; gap: 8px; padding: 0 24px; border-bottom: 1px solid var(--borde); }
   nav button { background: none; border: none; border-bottom: 2px solid transparent;
                border-radius: 0; padding: 12px 4px; margin-right: 16px;
                color: var(--suave); font-size: 14px; }
   nav button.activo { color: var(--texto); border-bottom-color: var(--azul); }
+  nav .aviso-rojo { display: inline-block; min-width: 18px; padding: 0 5px;
+                    margin-left: 6px; border-radius: 999px; background: var(--rojo);
+                    color: #fff; font-size: 11px; font-weight: 700; line-height: 18px;
+                    text-align: center; font-variant-numeric: tabular-nums; }
   main { padding: 24px; display: grid; gap: 16px; }
   .tarjetas { display: grid; gap: 16px;
               grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
@@ -57,42 +67,118 @@
   .error { color: var(--rojo); }
   svg { width: 100%; height: 180px; display: block; }
 
-  /* Bandeja */
-  .bandeja { display: grid; grid-template-columns: 330px 1fr; gap: 16px;
-             height: calc(100vh - 190px); min-height: 460px; }
-  @media (max-width: 900px) { .bandeja { grid-template-columns: 1fr;
-                                         height: auto; } }
+  /* ---------- Bandeja ---------- */
+  .barra-bandeja { display: flex; gap: 8px; }
+  .filtros { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chip { border-radius: 999px; padding: 6px 12px; font-size: 13px; color: var(--suave);
+          display: inline-flex; gap: 7px; align-items: center; }
+  .chip .n { color: var(--texto); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .chip.activo { border-color: var(--azul); color: var(--texto); background: #1e2a3d; }
+  .chip.rojo.con-pendientes { border-color: rgba(239, 68, 68, .55); color: var(--rojo-texto); }
+  .punto { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .punto.rojo { background: var(--rojo); }
+  .punto.verde { background: var(--verde); }
+  .punto.gris { background: #5b6473; }
+
+  .bandeja { display: grid; grid-template-columns: 340px 1fr; gap: 16px;
+             height: calc(100vh - 240px); min-height: 460px; }
+  @media (max-width: 900px) { .bandeja { grid-template-columns: 1fr; height: auto; } }
   .lista { background: var(--tarjeta); border: 1px solid var(--borde);
            border-radius: 12px; overflow-y: auto; }
   .chat { background: var(--tarjeta); border: 1px solid var(--borde);
-          border-radius: 12px; display: flex; flex-direction: column; }
-  .item { padding: 12px 14px; border-bottom: 1px solid var(--borde);
-          cursor: pointer; }
+          border-radius: 12px; display: flex; flex-direction: column; min-height: 0; }
+  .item { padding: 12px 14px 12px 11px; border-bottom: 1px solid var(--borde);
+          border-left: 3px solid transparent; cursor: pointer; }
   .item:hover { background: #1e222b; }
-  .item.sel { background: #1e2a3d; }
-  .item .quien { display: flex; justify-content: space-between; gap: 8px;
-                 font-weight: 600; }
+  .item.esperando_asesor { border-left-color: var(--rojo); background: var(--rojo-fondo); }
+  .item.esperando_asesor:hover { background: rgba(239, 68, 68, .15); }
+  .item.atendida, .item.cerrada { border-left-color: var(--verde); background: var(--verde-fondo); }
+  .item.atendida:hover, .item.cerrada:hover { background: rgba(34, 197, 94, .12); }
+  .item.sel { box-shadow: inset 0 0 0 1px var(--azul); }
+  .item .quien { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; }
   .item .previo { color: var(--suave); font-size: 12px; margin-top: 2px;
                   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .etiqueta { font-size: 10px; padding: 1px 6px; border-radius: 999px;
-              text-transform: uppercase; letter-spacing: .04em; }
+  .item .pie { margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap; }
+  .etiqueta { font-size: 10px; padding: 1px 7px; border-radius: 999px;
+              text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
   .et-canal { background: #24304a; color: #9dc0ff; }
-  .et-humano { background: #3a2a12; color: var(--ambar); }
-  .cabecera-chat { padding: 14px; border-bottom: 1px solid var(--borde);
+  .et-esperando_asesor { background: rgba(239, 68, 68, .2); color: var(--rojo-texto); }
+  .et-atendida, .et-cerrada { background: rgba(34, 197, 94, .18); color: var(--verde-texto); }
+  .et-bot { background: #262b36; color: var(--suave); }
+
+  .cabecera-chat { padding: 12px 14px; border-bottom: 1px solid var(--borde);
                    display: flex; justify-content: space-between;
                    align-items: center; gap: 12px; flex-wrap: wrap; }
+  .cabecera-chat.esperando_asesor { box-shadow: inset 3px 0 0 var(--rojo); }
+  .cabecera-chat.atendida, .cabecera-chat.cerrada { box-shadow: inset 3px 0 0 var(--verde); }
+  .acciones { display: flex; gap: 8px; flex-wrap: wrap; }
+  button.cerrar { background: rgba(34, 197, 94, .14); border-color: rgba(34, 197, 94, .5);
+                  color: var(--verde-texto); font-weight: 600; }
+  button.cerrar:hover { background: rgba(34, 197, 94, .24); }
+  button.cerrar:disabled { opacity: .5; cursor: default; }
   .mensajes { flex: 1; overflow-y: auto; padding: 16px; display: flex;
-              flex-direction: column; gap: 8px; }
+              flex-direction: column; gap: 8px; min-height: 0; }
   .burbuja { max-width: 72%; padding: 8px 12px; border-radius: 12px;
              white-space: pre-wrap; word-break: break-word; }
   .entrante { align-self: flex-start; background: #232833; }
   .saliente { align-self: flex-end; background: #1d3a63; }
   .saliente.humano { background: #3a3212; }
   .meta { font-size: 10px; color: var(--suave); margin-top: 4px; }
-  .redactar { border-top: 1px solid var(--borde); padding: 12px;
+  .redactar { border-top: 1px solid var(--borde); padding: 12px; position: relative;
               display: flex; gap: 8px; align-items: flex-end; }
   .redactar textarea { flex: 1; resize: vertical; min-height: 42px; }
+  button.rayo { padding: 8px 10px; font-size: 16px; line-height: 1.1; }
   .vacio { color: var(--suave); text-align: center; padding: 60px 20px; }
+
+  /* Selector de respuestas rapidas */
+  .selector { position: absolute; left: 12px; right: 12px; bottom: calc(100% - 4px);
+              max-height: 300px; overflow-y: auto; z-index: 5;
+              background: #11141a; border: 1px solid var(--borde); border-radius: 10px;
+              box-shadow: 0 10px 28px rgba(0, 0, 0, .55); }
+  .selector-cabeza { position: sticky; top: 0; background: #11141a;
+                     display: flex; justify-content: space-between; gap: 12px;
+                     padding: 7px 12px; font-size: 11px; color: var(--suave);
+                     border-bottom: 1px solid var(--borde); }
+  .opcion { padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #1c2029; }
+  .opcion:last-child { border-bottom: none; }
+  .opcion.activa, .opcion:hover { background: #1e2a3d; }
+  .atajo { font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+           font-size: 13px; font-weight: 600; color: #9dc0ff; }
+  .opcion .texto { color: var(--suave); font-size: 12px; margin-top: 1px;
+                   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .selector .vacio { padding: 16px 12px; text-align: left; }
+  .kbd { font-family: ui-monospace, monospace; font-size: 10px; padding: 0 4px;
+         border: 1px solid var(--borde); border-radius: 4px; }
+
+  /* ---------- Respuestas rapidas ---------- */
+  .rr-cabecera { display: flex; justify-content: space-between; align-items: flex-end;
+                 gap: 16px; flex-wrap: wrap; }
+  .rr-cabecera h2 { font-size: 18px; color: var(--texto); margin: 0; }
+  .rr-cabecera .nota { margin-top: 4px; }
+  .cupo { font-variant-numeric: tabular-nums; color: var(--suave); font-size: 13px; }
+  .rr-form { display: grid; gap: 12px; }
+  .rr-form label { display: grid; gap: 6px; font-size: 12px; color: var(--suave); }
+  .campo-atajo { display: flex; align-items: stretch; max-width: 360px; }
+  .campo-atajo span { padding: 8px 10px; border: 1px solid var(--borde); border-right: none;
+                      border-radius: 8px 0 0 8px; background: #11141a; color: #9dc0ff;
+                      font-family: ui-monospace, monospace; }
+  .campo-atajo input { flex: 1; border-radius: 0 8px 8px 0; font-family: ui-monospace, monospace; }
+  .rr-form textarea { min-height: 96px; resize: vertical; }
+  .rr-pie { display: flex; justify-content: space-between; align-items: center;
+            gap: 12px; flex-wrap: wrap; }
+  .rr-lista { padding: 0; overflow: hidden; }
+  .rr-fila { display: grid; grid-template-columns: 190px 1fr auto; gap: 16px;
+             align-items: start; padding: 12px 16px; border-bottom: 1px solid var(--borde); }
+  .rr-fila:last-child { border-bottom: none; }
+  .rr-fila .texto-completo { white-space: pre-wrap; word-break: break-word; color: var(--texto); }
+  .rr-fila .acciones { justify-content: flex-end; }
+  @media (max-width: 700px) {
+    .rr-fila { grid-template-columns: 1fr; gap: 6px; }
+    .rr-fila .acciones { justify-content: flex-start; }
+  }
+  .aviso-toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+                 background: #1e2a3d; border: 1px solid var(--azul); color: var(--texto);
+                 padding: 8px 16px; border-radius: 8px; z-index: 20; }
 </style>
 </head>
 <body>
@@ -119,7 +205,8 @@
 
 <nav>
   <button id="tabMetricas" class="activo">Metricas</button>
-  <button id="tabBandeja">Conversaciones</button>
+  <button id="tabBandeja">Conversaciones<span id="avisoEsperando" class="aviso-rojo" hidden></span></button>
+  <button id="tabRespuestas">Respuestas rápidas</button>
 </nav>
 
 <main id="vistaMetricas">
@@ -147,10 +234,11 @@
 </main>
 
 <main id="vistaBandeja" hidden>
-  <div style="display:flex; gap:8px">
+  <div class="barra-bandeja">
     <input id="buscar" placeholder="Buscar por telefono..." style="flex:1">
     <button id="refrescar">Refrescar</button>
   </div>
+  <div class="filtros" id="filtros" role="tablist" aria-label="Filtrar conversaciones"></div>
   <div class="bandeja">
     <div class="lista" id="lista"></div>
     <div class="chat">
@@ -159,11 +247,51 @@
       </div>
       <div class="mensajes" id="mensajes"></div>
       <div class="redactar" id="redactar" hidden>
-        <textarea id="texto" placeholder="Escribe tu respuesta..."></textarea>
+        <div class="selector" id="selector" hidden role="listbox" aria-label="Respuestas rápidas"></div>
+        <button id="rayo" class="rayo" title="Respuestas rápidas (o escribe /)" aria-label="Respuestas rápidas">⚡</button>
+        <textarea id="texto" placeholder="Escribe tu respuesta… o / para una respuesta rápida"></textarea>
         <button id="enviar" class="primario">Enviar</button>
       </div>
     </div>
   </div>
+</main>
+
+<main id="vistaRespuestas" hidden>
+  <div class="rr-cabecera">
+    <div>
+      <h2>Respuestas rápidas</h2>
+      <div class="nota">En una conversación escribe <span class="atajo">/</span> y el atajo para insertar el mensaje. También con el botón ⚡.</div>
+    </div>
+    <div style="display:flex; gap:12px; align-items:center">
+      <span class="cupo" id="cupo"></span>
+      <button id="nuevaRespuesta" class="primario">+ Nueva respuesta</button>
+    </div>
+  </div>
+
+  <form class="tarjeta rr-form" id="formRespuesta" hidden>
+    <h2 id="tituloForm" style="margin:0">Nueva respuesta</h2>
+    <label>Atajo
+      <div class="campo-atajo">
+        <span>/</span>
+        <input id="rrAtajo" maxlength="40" autocomplete="off" placeholder="saludo">
+      </div>
+      <span class="nota" id="rrAtajoNota">Minúsculas, sin espacios ni acentos.</span>
+    </label>
+    <label>Mensaje
+      <textarea id="rrTexto" maxlength="1000" placeholder="¡Hola! Soy asesor de Sidhe Group…"></textarea>
+    </label>
+    <div class="rr-pie">
+      <span class="nota" id="rrContador">0 / 1000</span>
+      <div class="acciones">
+        <button type="button" id="rrCancelar">Cancelar</button>
+        <button type="submit" id="rrGuardar" class="primario">Guardar</button>
+      </div>
+    </div>
+    <div class="error" id="rrError" hidden></div>
+  </form>
+
+  <input id="rrBuscar" placeholder="Buscar por atajo o texto...">
+  <div class="tarjeta rr-lista" id="rrLista"></div>
 </main>
 </div>
 
@@ -174,7 +302,8 @@ let actual = null;
 
 function esc(t) {
   return String(t === null || t === undefined ? "" : t)
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 async function api(ruta, opciones) {
@@ -193,6 +322,21 @@ function mostrarLogin(conError) {
   $("login").hidden = false;
   $("app").hidden = true;
   $("errorLogin").hidden = !conError;
+}
+
+let temporizadorAviso = null;
+function avisar(texto) {
+  let el = document.querySelector(".aviso-toast");
+  if (!el) {
+    el = document.createElement("div");
+    el.className = "aviso-toast";
+    el.setAttribute("role", "status");
+    document.body.appendChild(el);
+  }
+  el.textContent = texto;
+  el.hidden = false;
+  clearTimeout(temporizadorAviso);
+  temporizadorAviso = setTimeout(function () { el.hidden = true; }, 2500);
 }
 
 /* ---------- Metricas ---------- */
@@ -285,6 +429,15 @@ function dibujarSerie(serie) {
 
 /* ---------- Bandeja ---------- */
 
+// Orden y aspecto de cada estado. Rojo = alguien espera respuesta humana.
+const ESTADOS = {
+  esperando_asesor: { nombre: "Esperando asesor", punto: "rojo" },
+  atendida: { nombre: "Atendida", punto: "verde" },
+  cerrada: { nombre: "Cerrada", punto: "verde" },
+  bot: { nombre: "Con el bot", punto: "gris" },
+};
+let filtro = "";
+
 function hora(iso) {
   if (!iso) return "";
   const f = new Date(iso);
@@ -292,56 +445,108 @@ function hora(iso) {
                                      hour: "2-digit", minute: "2-digit" });
 }
 
+function hace(iso) {
+  if (!iso) return "";
+  const min = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  if (min < 1) return "ahora";
+  if (min < 60) return min + " min";
+  const h = Math.floor(min / 60);
+  if (h < 24) return h + " h";
+  return Math.floor(h / 24) + " d";
+}
+
+function etiquetaEstado(c) {
+  const e = ESTADOS[c.estado] || ESTADOS.bot;
+  const espera = c.estado === "esperando_asesor" && c.esperando_desde
+    ? " · " + hace(c.esperando_desde) : "";
+  return '<span class="etiqueta et-' + esc(c.estado) + '">' + e.nombre + espera + '</span>';
+}
+
+function pintarFiltros(conteos) {
+  const opciones = [["", "Todas", null]].concat(
+    Object.keys(ESTADOS).map(function (k) { return [k, ESTADOS[k].nombre, ESTADOS[k].punto]; })
+  );
+  $("filtros").innerHTML = opciones.map(function (o) {
+    const valor = o[0], nombre = o[1], punto = o[2];
+    const n = conteos ? (valor ? conteos[valor] : conteos.todas) : 0;
+    const clases = "chip" + (filtro === valor ? " activo" : "") +
+      (valor === "esperando_asesor" ? " rojo" + (n ? " con-pendientes" : "") : "");
+    return '<button class="' + clases + '" role="tab" aria-selected="' + (filtro === valor) +
+      '" data-filtro="' + valor + '">' +
+      (punto ? '<span class="punto ' + punto + '"></span>' : "") +
+      nombre + ' <span class="n">' + (n || 0) + '</span></button>';
+  }).join("");
+  Array.prototype.forEach.call($("filtros").querySelectorAll(".chip"), function (b) {
+    b.onclick = function () { filtro = b.dataset.filtro; cargarLista(); };
+  });
+
+  const esperando = conteos ? conteos.esperando_asesor : 0;
+  $("avisoEsperando").hidden = !esperando;
+  $("avisoEsperando").textContent = esperando || "";
+}
+
 async function cargarLista() {
   const r = await api("/internal/conversaciones?buscar=" +
-                      encodeURIComponent($("buscar").value) + "&limite=50");
+                      encodeURIComponent($("buscar").value) + "&limite=50" +
+                      "&estado=" + encodeURIComponent(filtro));
   if (!r.ok) return;
   const datos = await r.json();
+  pintarFiltros(datos.conteos);
   const lista = $("lista");
   if (!datos.conversaciones.length) {
-    lista.innerHTML = '<div class="vacio">Sin conversaciones</div>';
+    lista.innerHTML = '<div class="vacio">' + (filtro
+      ? "Nada en «" + ESTADOS[filtro].nombre + "»"
+      : "Sin conversaciones") + '</div>';
     return;
   }
   lista.innerHTML = datos.conversaciones.map(function (c) {
     const sel = actual && actual.canal === c.canal && actual.user_id === c.user_id;
-    return '<div class="item' + (sel ? " sel" : "") + '"' +
-      ' data-canal="' + esc(c.canal) + '" data-user="' + esc(c.user_id) + '">' +
+    return '<div class="item ' + esc(c.estado) + (sel ? " sel" : "") + '"' +
+      ' tabindex="0" data-canal="' + esc(c.canal) + '" data-user="' + esc(c.user_id) + '">' +
       '<div class="quien"><span>' + esc(c.user_id) + '</span>' +
       '<span class="nota">' + hora(c.ultima_fecha) + '</span></div>' +
-      '<div class="previo">' + (c.ultima_direccion === "in" ? "" : "Tu: ") +
+      '<div class="previo">' + (c.ultima_direccion === "in" ? "" : "Tú: ") +
       esc(c.ultimo_mensaje) + '</div>' +
-      '<div style="margin-top:6px"><span class="etiqueta et-canal">' +
-      esc(c.canal) + '</span> ' +
-      (c.bot_pausado ? '<span class="etiqueta et-humano">humano</span>' : '') +
-      '</div></div>';
+      '<div class="pie"><span class="etiqueta et-canal">' + esc(c.canal) + '</span>' +
+      etiquetaEstado(c) + '</div></div>';
   }).join("");
 
   Array.prototype.forEach.call(lista.querySelectorAll(".item"), function (el) {
-    el.onclick = function () {
-      abrir(el.dataset.canal, el.dataset.user);
-    };
+    el.onclick = function () { abrir(el.dataset.canal, el.dataset.user); };
+    el.onkeydown = function (e) { if (e.key === "Enter") el.click(); };
   });
 }
 
-async function abrir(canal, userId) {
+function rutaConversacion(canal, userId, accion) {
+  return "/internal/conversaciones/" + encodeURIComponent(canal) + "/" +
+         encodeURIComponent(userId) + (accion ? "/" + accion : "");
+}
+
+async function abrir(canal, userId, conservarScroll) {
+  const cambio = !actual || actual.canal !== canal || actual.user_id !== userId;
   actual = { canal: canal, user_id: userId };
-  const r = await api("/internal/conversaciones/" + encodeURIComponent(canal) +
-                      "/" + encodeURIComponent(userId));
+  const r = await api(rutaConversacion(canal, userId));
   if (!r.ok) return;
   const d = await r.json();
 
-  $("cabeceraChat").innerHTML =
+  const cabecera = $("cabeceraChat");
+  cabecera.className = "cabecera-chat " + d.estado;
+  cabecera.innerHTML =
     '<div><strong>' + esc(d.user_id) + '</strong> ' +
-    '<span class="etiqueta et-canal">' + esc(d.canal) + '</span>' +
-    (d.bot_pausado ? ' <span class="etiqueta et-humano">atendida por humano</span>' : '') +
+    '<span class="etiqueta et-canal">' + esc(d.canal) + '</span> ' + etiquetaEstado(d) +
     '<div class="nota">' + (d.ventana_abierta
       ? "Ventana de 24h abierta: puedes escribir libremente."
       : "Ventana de 24h vencida: WhatsApp rechazara texto libre.") + '</div></div>' +
-    (d.bot_pausado
-      ? '<button id="devolver">Devolver al bot</button>'
-      : '<span class="nota">El bot esta respondiendo</span>');
+    '<div class="acciones">' +
+    (d.bot_pausado ? '<button id="devolver">Devolver al bot</button>' : '') +
+    (d.estado === "cerrada"
+      ? '<button class="cerrar" disabled>✓ Cerrada</button>'
+      : '<button id="cerrarConv" class="cerrar">✓ Cerrar conversación</button>') +
+    '</div>';
 
-  $("mensajes").innerHTML = d.mensajes.map(function (m) {
+  const caja = $("mensajes");
+  const alFondo = caja.scrollHeight - caja.scrollTop - caja.clientHeight < 40;
+  caja.innerHTML = d.mensajes.map(function (m) {
     const clases = m.direccion === "in"
       ? "burbuja entrante"
       : "burbuja saliente" + (m.tipo === "humano" ? " humano" : "");
@@ -351,16 +556,32 @@ async function abrir(canal, userId) {
     return '<div class="' + clases + '">' + esc(m.contenido) +
            '<div class="meta">' + etiqueta + " - " + hora(m.fecha) + '</div></div>';
   }).join("");
-  $("mensajes").scrollTop = $("mensajes").scrollHeight;
+  // Al refrescar solo, no arrastrar al asesor al fondo si subio a leer
+  if (cambio || !conservarScroll || alFondo) caja.scrollTop = caja.scrollHeight;
 
   $("redactar").hidden = false;
+  if (cambio) cerrarSelector();
+
   const devolver = $("devolver");
   if (devolver) {
     devolver.onclick = async function () {
-      await api("/internal/conversaciones/" + encodeURIComponent(canal) + "/" +
-                encodeURIComponent(userId) + "/devolver-al-bot", { method: "POST" });
+      await api(rutaConversacion(canal, userId, "devolver-al-bot"), { method: "POST" });
+      avisar("El bot vuelve a atender esta conversación");
       await abrir(canal, userId);
-      cargarLista();
+    };
+  }
+  const cerrar = $("cerrarConv");
+  if (cerrar) {
+    cerrar.onclick = async function () {
+      cerrar.disabled = true;
+      const resp = await api(rutaConversacion(canal, userId, "cerrar"), { method: "POST" });
+      if (!resp.ok) {
+        cerrar.disabled = false;
+        alert("No se pudo cerrar la conversación: " + resp.status);
+        return;
+      }
+      avisar("Conversación cerrada");
+      await abrir(canal, userId);
     };
   }
   cargarLista();
@@ -369,11 +590,10 @@ async function abrir(canal, userId) {
 async function enviar() {
   const texto = $("texto").value.trim();
   if (!texto || !actual) return;
+  cerrarSelector();
   $("enviar").disabled = true;
   try {
-    const r = await api("/internal/conversaciones/" +
-      encodeURIComponent(actual.canal) + "/" +
-      encodeURIComponent(actual.user_id) + "/responder", {
+    const r = await api(rutaConversacion(actual.canal, actual.user_id, "responder"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ texto: texto }),
@@ -390,32 +610,291 @@ async function enviar() {
   }
 }
 
-/* ---------- Navegacion ---------- */
+/* ---------- Selector de respuestas rapidas (/atajo) ---------- */
 
-function verMetricas() {
-  $("tabMetricas").classList.add("activo");
-  $("tabBandeja").classList.remove("activo");
-  $("vistaMetricas").hidden = false;
-  $("vistaBandeja").hidden = true;
-  cargarMetricas();
+let respuestas = [];
+let maximoRespuestas = 100;
+const sel = { abierto: false, desde: -1, opciones: [], activa: 0 };
+
+function normalizar(t) {
+  return String(t || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 }
 
+async function cargarRespuestas() {
+  const r = await api("/internal/respuestas-rapidas");
+  if (!r.ok) return;
+  const d = await r.json();
+  respuestas = d.respuestas;
+  maximoRespuestas = d.maximo;
+}
+
+function buscarRespuestas(consulta) {
+  const q = normalizar(consulta);
+  if (!q) return respuestas.slice();
+  const empiezan = [], contienen = [], enTexto = [];
+  respuestas.forEach(function (r) {
+    if (r.atajo.indexOf(q) === 0) empiezan.push(r);
+    else if (r.atajo.indexOf(q) > 0) contienen.push(r);
+    else if (normalizar(r.texto).indexOf(q) >= 0) enTexto.push(r);
+  });
+  return empiezan.concat(contienen, enTexto);
+}
+
+// La "/" cuenta solo al inicio o despues de un espacio: asi una URL o "1/2" no abren nada
+function tokenDiagonal(area) {
+  const antes = area.value.slice(0, area.selectionStart);
+  const m = antes.match(/(^|\s)\/([^\s\/]*)$/);
+  return m ? { desde: antes.length - m[2].length - 1, consulta: m[2] } : null;
+}
+
+function abrirSelector(desde, consulta) {
+  sel.abierto = true;
+  sel.desde = desde;
+  sel.opciones = buscarRespuestas(consulta);
+  sel.activa = 0;
+  pintarSelector(consulta);
+}
+
+function cerrarSelector() {
+  sel.abierto = false;
+  sel.desde = -1;
+  $("selector").hidden = true;
+}
+
+function pintarSelector(consulta) {
+  const caja = $("selector");
+  caja.hidden = false;
+  const cabeza = '<div class="selector-cabeza"><span>Respuestas rápidas' +
+    (consulta ? ' · <span class="atajo">/' + esc(consulta) + '</span>' : '') + '</span>' +
+    '<span><span class="kbd">↑↓</span> elegir · <span class="kbd">Enter</span> insertar · ' +
+    '<span class="kbd">Esc</span> cerrar</span></div>';
+  if (!sel.opciones.length) {
+    caja.innerHTML = cabeza + '<div class="vacio">' + (respuestas.length
+      ? 'Ninguna respuesta coincide con <span class="atajo">/' + esc(consulta) + '</span>. '
+      : 'Todavía no hay respuestas rápidas. ') +
+      '<a href="#" id="irARespuestas" style="color:#9dc0ff">Crear una</a></div>';
+    $("irARespuestas").onclick = function (e) {
+      e.preventDefault(); cerrarSelector(); verRespuestas(); nuevaRespuesta(consulta);
+    };
+    return;
+  }
+  caja.innerHTML = cabeza + sel.opciones.map(function (r, i) {
+    return '<div class="opcion' + (i === sel.activa ? " activa" : "") + '" role="option"' +
+      ' aria-selected="' + (i === sel.activa) + '" data-i="' + i + '">' +
+      '<div class="atajo">/' + esc(r.atajo) + '</div>' +
+      '<div class="texto">' + esc(r.texto) + '</div></div>';
+  }).join("");
+  Array.prototype.forEach.call(caja.querySelectorAll(".opcion"), function (el) {
+    // mousedown para que el textarea no pierda el foco antes de insertar
+    el.onmousedown = function (e) { e.preventDefault(); insertarRespuesta(+el.dataset.i); };
+  });
+  const activa = caja.querySelector(".opcion.activa");
+  if (activa) activa.scrollIntoView({ block: "nearest" });
+}
+
+function insertarRespuesta(i) {
+  const r = sel.opciones[i];
+  const area = $("texto");
+  if (!r) return;
+  const fin = area.selectionStart;
+  const inicio = sel.desde >= 0 ? sel.desde : fin;
+  area.value = area.value.slice(0, inicio) + r.texto + area.value.slice(fin);
+  const cursor = inicio + r.texto.length;
+  area.focus();
+  area.setSelectionRange(cursor, cursor);
+  cerrarSelector();
+}
+
+function alEscribir() {
+  const token = tokenDiagonal($("texto"));
+  if (token) abrirSelector(token.desde, token.consulta);
+  else if (sel.abierto && sel.desde >= 0) cerrarSelector();
+}
+
+function teclasSelector(e) {
+  if (!sel.abierto) {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) enviar();
+    return;
+  }
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    if (!sel.opciones.length) return;
+    const paso = e.key === "ArrowDown" ? 1 : -1;
+    sel.activa = (sel.activa + paso + sel.opciones.length) % sel.opciones.length;
+    pintarSelector(tokenDiagonal($("texto")) ? tokenDiagonal($("texto")).consulta : "");
+  } else if (e.key === "Enter" || e.key === "Tab") {
+    if (!sel.opciones.length) return;
+    e.preventDefault();
+    insertarRespuesta(sel.activa);
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    cerrarSelector();
+  }
+}
+
+/* ---------- Administrar respuestas rapidas ---------- */
+
+let editando = null;
+
+function pintarRespuestas() {
+  $("cupo").textContent = respuestas.length + " de " + maximoRespuestas;
+  $("nuevaRespuesta").disabled = respuestas.length >= maximoRespuestas;
+  const q = normalizar($("rrBuscar").value.trim());
+  const visibles = respuestas.filter(function (r) {
+    return !q || r.atajo.indexOf(q) >= 0 || normalizar(r.texto).indexOf(q) >= 0;
+  });
+  if (!visibles.length) {
+    $("rrLista").innerHTML = '<div class="vacio">' + (respuestas.length
+      ? "Ninguna respuesta coincide con la búsqueda."
+      : "Todavía no hay respuestas rápidas. Crea la primera con «+ Nueva respuesta».") + '</div>';
+    return;
+  }
+  $("rrLista").innerHTML = visibles.map(function (r) {
+    return '<div class="rr-fila">' +
+      '<div class="atajo">/' + esc(r.atajo) + '</div>' +
+      '<div class="texto-completo">' + esc(r.texto) + '</div>' +
+      '<div class="acciones">' +
+      '<button data-editar="' + r.id + '">Editar</button>' +
+      '<button class="discreto" data-borrar="' + r.id + '">Borrar</button></div></div>';
+  }).join("");
+  Array.prototype.forEach.call($("rrLista").querySelectorAll("[data-editar]"), function (b) {
+    b.onclick = function () {
+      editarRespuesta(respuestas.find(function (r) { return r.id === +b.dataset.editar; }));
+    };
+  });
+  Array.prototype.forEach.call($("rrLista").querySelectorAll("[data-borrar]"), function (b) {
+    b.onclick = function () {
+      borrarRespuesta(respuestas.find(function (r) { return r.id === +b.dataset.borrar; }));
+    };
+  });
+}
+
+function atajoNormalizado(valor) {
+  return normalizar(valor).trim().replace(/^\/+/, "").replace(/\s+/g, "-")
+    .replace(/[^a-z0-9_-]/g, "").slice(0, 30);
+}
+
+function actualizarAyudasForm() {
+  const crudo = $("rrAtajo").value;
+  const limpio = atajoNormalizado(crudo);
+  $("rrAtajoNota").textContent = crudo && limpio !== crudo.trim()
+    ? "Se guardará como /" + (limpio || "…")
+    : "Minúsculas, sin espacios ni acentos.";
+  $("rrContador").textContent = $("rrTexto").value.length + " / 1000";
+}
+
+function abrirForm(titulo, atajo, texto) {
+  $("tituloForm").textContent = titulo;
+  $("rrAtajo").value = atajo || "";
+  $("rrTexto").value = texto || "";
+  $("rrError").hidden = true;
+  $("formRespuesta").hidden = false;
+  actualizarAyudasForm();
+  (atajo ? $("rrTexto") : $("rrAtajo")).focus();
+}
+
+function nuevaRespuesta(atajoSugerido) {
+  editando = null;
+  abrirForm("Nueva respuesta", atajoSugerido || "", "");
+}
+
+function editarRespuesta(r) {
+  if (!r) return;
+  editando = r.id;
+  abrirForm("Editar /" + r.atajo, r.atajo, r.texto);
+  $("formRespuesta").scrollIntoView({ block: "nearest" });
+}
+
+async function guardarRespuesta(e) {
+  e.preventDefault();
+  $("rrGuardar").disabled = true;
+  try {
+    const r = await api(
+      "/internal/respuestas-rapidas" + (editando ? "/" + editando : ""), {
+        method: editando ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ atajo: $("rrAtajo").value, texto: $("rrTexto").value }),
+      });
+    if (!r.ok) {
+      const err = await r.json().catch(function () { return {}; });
+      $("rrError").textContent = typeof err.detail === "string"
+        ? err.detail : "No se pudo guardar (" + r.status + ").";
+      $("rrError").hidden = false;
+      return;
+    }
+    const guardada = await r.json();
+    $("formRespuesta").hidden = true;
+    avisar("Guardada como /" + guardada.atajo);
+    await cargarRespuestas();
+    pintarRespuestas();
+  } finally {
+    $("rrGuardar").disabled = false;
+  }
+}
+
+async function borrarRespuesta(r) {
+  if (!r || !confirm("¿Borrar la respuesta rápida /" + r.atajo + "?")) return;
+  const resp = await api("/internal/respuestas-rapidas/" + r.id, { method: "DELETE" });
+  if (!resp.ok) { alert("No se pudo borrar: " + resp.status); return; }
+  avisar("/" + r.atajo + " borrada");
+  await cargarRespuestas();
+  pintarRespuestas();
+}
+
+/* ---------- Navegacion ---------- */
+
+const VISTAS = { Metricas: "vistaMetricas", Bandeja: "vistaBandeja", Respuestas: "vistaRespuestas" };
+let autoRefresco = null;
+
+function mostrar(nombre) {
+  Object.keys(VISTAS).forEach(function (k) {
+    $("tab" + k).classList.toggle("activo", k === nombre);
+    $(VISTAS[k]).hidden = k !== nombre;
+  });
+  clearInterval(autoRefresco);
+  if (nombre === "Bandeja") {
+    // Los rojos tienen que aparecer solos, sin que nadie le dé "Refrescar"
+    autoRefresco = setInterval(function () {
+      if (document.hidden) return;
+      if (actual) abrir(actual.canal, actual.user_id, true); else cargarLista();
+    }, 20000);
+  }
+}
+
+function verMetricas() { mostrar("Metricas"); cargarMetricas(); }
+
 function verBandeja() {
-  $("tabBandeja").classList.add("activo");
-  $("tabMetricas").classList.remove("activo");
-  $("vistaBandeja").hidden = false;
-  $("vistaMetricas").hidden = true;
+  mostrar("Bandeja");
   cargarLista();
+  cargarRespuestas();
+}
+
+async function verRespuestas() {
+  mostrar("Respuestas");
+  await cargarRespuestas();
+  pintarRespuestas();
 }
 
 $("tabMetricas").onclick = verMetricas;
 $("tabBandeja").onclick = verBandeja;
+$("tabRespuestas").onclick = verRespuestas;
 $("refrescar").onclick = cargarLista;
 $("buscar").onkeydown = function (e) { if (e.key === "Enter") cargarLista(); };
 $("enviar").onclick = enviar;
-$("texto").onkeydown = function (e) {
-  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) enviar();
+$("texto").addEventListener("input", alEscribir);
+$("texto").addEventListener("keydown", teclasSelector);
+$("texto").addEventListener("blur", function () { setTimeout(cerrarSelector, 120); });
+$("rayo").onclick = function () {
+  if (sel.abierto) { cerrarSelector(); return; }
+  $("texto").focus();
+  abrirSelector(-1, "");
 };
+$("nuevaRespuesta").onclick = function () { nuevaRespuesta(""); };
+$("rrCancelar").onclick = function () { $("formRespuesta").hidden = true; };
+$("formRespuesta").onsubmit = guardarRespuesta;
+$("rrAtajo").oninput = actualizarAyudasForm;
+$("rrTexto").oninput = actualizarAyudasForm;
+$("rrBuscar").oninput = pintarRespuestas;
 $("dias").onchange = cargarMetricas;
 
 $("entrar").onclick = async function () {
