@@ -125,6 +125,8 @@ Notas de operación:
 | `GOOGLE_CALENDAR_RECORDATORIO_MIN` | Minutos de aviso en el evento (default 60) |
 | `GOOGLE_SHEETS_PEDIDOS_ID` | Id del Sheet de operaciones (vacío = sin sincronizar pedidos) |
 | `GOOGLE_SHEETS_PEDIDOS_HOJA` | Pestaña con el estado de pedidos (default `STATUS`) |
+| `AGENDA_DIAS_ADELANTE` | Días hacia adelante con horarios abiertos; el servicio los rellena solo (default 21, `0` = apagado) |
+| `AGENDA_MINUTOS_POR_CITA` | Duración de cada cita (default 60). No cambiar con horarios ya generados |
 | `PEDIDOS_MESES_HISTORIAL` | Meses de pedidos que se guardan (default 3) |
 | `PEDIDOS_SINCRONIZAR_CADA_HORAS` | Cada cuánto relee la hoja el servicio (default 2; `0` = nunca) |
 | `META_APP_SECRET` | Secreto de la app de Meta: valida la firma de los webhooks |
@@ -134,6 +136,22 @@ Notas de operación:
 | `N8N_WEBHOOK_CITAS` | URL del webhook de n8n para citas (vacío = no se envía) |
 | `TZ` | `America/Mexico_City` |
 | `LOG_LEVEL` | `INFO` por default |
+
+## La agenda se mantiene abierta sola
+
+Los horarios de cita son filas de la tabla `slots` generadas por adelantado,
+no se calculan al vuelo. Si nadie genera más, la agenda se va acabando día a
+día: en producción el bot llegó a ofrecer solo "lunes y martes" y no dejaba
+agendar la semana siguiente.
+
+Por eso el servicio rellena `AGENDA_DIAS_ADELANTE` días (default 21) al
+arrancar y cada 6 horas. Es idempotente: un horario que ya existe, libre o
+reservado, nunca se duplica ni se toca. Respeta los días que cierra cada
+stand. Para abrir la agenda de inmediato sin esperar un deploy:
+
+```bash
+python scripts/seed_slots.py --dias 21
+```
 
 ## Contrato de recordatorios (para n8n)
 

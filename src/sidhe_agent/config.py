@@ -89,6 +89,14 @@ class Settings(BaseSettings):
     # Minutos de recordatorio del evento (popup) en el calendario del stand
     google_calendar_recordatorio_min: int = 60
 
+    # Agenda: cuántos días hacia adelante se mantienen horarios abiertos. El
+    # servicio los rellena solo; sin esto la agenda se va acabando día a día.
+    # Debe ser mayor que la ventana que ofrece el bot (14 días). 0 = apagado.
+    agenda_dias_adelante: int = 21
+    # Duración de cada cita. NO cambiar con horarios ya generados: los
+    # bloques nuevos se encimarían con los viejos.
+    agenda_minutos_por_cita: int = 60
+
     # Google Sheets: hoja de operaciones con el estado de los pedidos. Se lee
     # con la MISMA cuenta de servicio (compartir el Sheet con ese correo).
     # El id es lo que va entre /d/ y /edit en la URL. Vacío = sin sincronizar.

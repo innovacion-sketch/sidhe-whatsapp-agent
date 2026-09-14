@@ -35,7 +35,7 @@ from .db.session import dispose_engine, get_engine, get_session
 from .graph.builder import build_graph
 from .memory.long_term import crear_extractor
 from .observability import configurar_logging, enmascarar_user_id
-from .services import conversaciones, google_sheets, metricas
+from .services import agenda, conversaciones, google_sheets, metricas
 from .services.transcription import transcribir_audio
 from .services.twilio_content import enviar_recordatorio
 from .tools.citas import fecha_legible
@@ -137,13 +137,21 @@ async def lifespan(app: FastAPI):
             settings.pedidos_sincronizar_cada_horas
         )
     )
+    # Igual con la agenda: los horarios son filas generadas por adelantado y
+    # sin relleno se acaban solos (el bot llego a ofrecer solo dos dias).
+    app.state.agenda = asyncio.create_task(
+        agenda.mantener_agenda_abierta(
+            settings.agenda_dias_adelante, settings.agenda_minutos_por_cita
+        )
+    )
 
     logger.info("app_iniciada", modelo=settings.anthropic_model)
     yield
 
-    app.state.sincronizador.cancel()
-    with suppress(asyncio.CancelledError):
-        await app.state.sincronizador
+    for tarea in (app.state.sincronizador, app.state.agenda):
+        tarea.cancel()
+        with suppress(asyncio.CancelledError):
+            await tarea
     await app.state.stack.aclose()
     await dispose_engine()
 
