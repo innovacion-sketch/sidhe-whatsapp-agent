@@ -210,6 +210,9 @@ _semilla = [
     if a not in _m5.REEMPLAZADAS
 ] + list(_m5.RESPUESTAS_EQUIPO)
 
+_m6 = _cargar_migracion("0006_horario_plantillas_listas.py")
+_semilla = [(a, _m6.texto_corregido() if a == _m6.ATAJO else t) for a, t in _semilla]
+
 RESPUESTAS = {
     i + 1: {"id": i + 1, "atajo": a, "texto": t} for i, (a, t) in enumerate(_semilla)
 }
