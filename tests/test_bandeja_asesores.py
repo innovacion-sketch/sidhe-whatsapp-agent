@@ -267,3 +267,59 @@ def test_las_respuestas_iniciales_no_traen_precios_ni_confort():
         assert atajo == rr.normalizar_atajo(atajo), atajo
         assert "$" not in texto and "pesos" not in texto.lower(), atajo
         assert "confort" not in texto.lower(), atajo
+
+
+def _migracion(nombre: str):
+    import importlib.util
+    from pathlib import Path
+
+    ruta = Path(__file__).parent.parent / "alembic" / "versions" / nombre
+    spec = importlib.util.spec_from_file_location(nombre, ruta)
+    modulo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(modulo)
+    return modulo
+
+
+def test_las_respuestas_del_equipo_se_pueden_editar_desde_el_panel():
+    """Si una pasa del limite, el panel no dejaria guardarla al editarla."""
+    equipo = _migracion("0005_respuestas_del_equipo.py").RESPUESTAS_EQUIPO
+    assert len(equipo) == 19
+    for atajo, texto in equipo:
+        assert atajo == rr.normalizar_atajo(atajo), atajo
+        assert rr.validar(atajo, texto) == (atajo, texto.strip()), atajo
+
+
+def test_despues_de_la_0005_no_hay_atajos_repetidos():
+    iniciales = dict(_migracion("0004_bandeja_asesores.py").RESPUESTAS_INICIALES)
+    m5 = _migracion("0005_respuestas_del_equipo.py")
+    finales = {
+        m5.RENOMBRADAS.get(a, a) for a in iniciales if a not in m5.REEMPLAZADAS
+    }
+    for atajo, _ in m5.RESPUESTAS_EQUIPO:
+        assert atajo not in finales, f"/{atajo} choca con una inicial que se queda"
+        finales.add(atajo)
+    assert "sucursal" not in finales and "telefono-sucursal" in finales
+
+
+def test_solo_se_reemplazan_iniciales_que_existen():
+    """El borrado compara contra el texto original de la 0004; si el atajo no
+    existe ahi, la migracion truena en vez de no borrar nada en silencio."""
+    iniciales = dict(_migracion("0004_bandeja_asesores.py").RESPUESTAS_INICIALES)
+    m5 = _migracion("0005_respuestas_del_equipo.py")
+    for atajo in list(m5.REEMPLAZADAS) + list(m5.RENOMBRADAS):
+        assert atajo in iniciales, atajo
+
+
+def test_ninguna_migracion_guarda_datos_bancarios():
+    """La cuenta para pagar envios se da de alta en el panel, no en el codigo."""
+    import re
+
+    for nombre in ("0004_bandeja_asesores.py", "0005_respuestas_del_equipo.py"):
+        modulo = _migracion(nombre)
+        textos = getattr(modulo, "RESPUESTAS_INICIALES", []) + getattr(
+            modulo, "RESPUESTAS_EQUIPO", []
+        )
+        for atajo, texto in textos:
+            assert not re.search(r"\d{16,18}", texto), f"/{atajo} parece traer una cuenta"
+    atajos = [a for a, _ in _migracion("0005_respuestas_del_equipo.py").RESPUESTAS_EQUIPO]
+    assert "envio" not in atajos

@@ -193,15 +193,25 @@ from sidhe_agent.services.respuestas_rapidas import normalizar_atajo  # noqa: E4
 
 import importlib.util  # noqa: E402
 
-_spec = importlib.util.spec_from_file_location(
-    "semilla", Path(__file__).parent.parent / "alembic" / "versions" / "0004_bandeja_asesores.py"
-)
-_semilla = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_semilla)
+def _cargar_migracion(nombre: str):
+    ruta = Path(__file__).parent.parent / "alembic" / "versions" / nombre
+    spec = importlib.util.spec_from_file_location(nombre, ruta)
+    modulo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(modulo)
+    return modulo
+
+
+# Mismo resultado que aplicar las migraciones 0004 y 0005 en orden
+_m4 = _cargar_migracion("0004_bandeja_asesores.py")
+_m5 = _cargar_migracion("0005_respuestas_del_equipo.py")
+_semilla = [
+    (_m5.RENOMBRADAS.get(a, a), t)
+    for a, t in _m4.RESPUESTAS_INICIALES
+    if a not in _m5.REEMPLAZADAS
+] + list(_m5.RESPUESTAS_EQUIPO)
 
 RESPUESTAS = {
-    i + 1: {"id": i + 1, "atajo": a, "texto": t}
-    for i, (a, t) in enumerate(_semilla.RESPUESTAS_INICIALES)
+    i + 1: {"id": i + 1, "atajo": a, "texto": t} for i, (a, t) in enumerate(_semilla)
 }
 
 
