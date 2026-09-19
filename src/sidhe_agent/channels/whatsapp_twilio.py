@@ -3,9 +3,16 @@
 Los mensajes con UI se envían como list-picker/quick-reply vía Content API
 (services/twilio_content.py). Si la Content API falla, la UI se degrada a
 texto numerado para que el cliente nunca se quede sin respuesta.
+
+Varios números: el negocio puede tener más de un número de WhatsApp en la
+misma cuenta de Twilio. Al cliente se le contesta SIEMPRE desde el número al
+que escribió (el `To` de su último mensaje); si no, recibiría la respuesta de
+un contacto que no tiene guardado. Cuando no se sabe, sale del número por
+defecto.
 """
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import structlog
@@ -19,6 +26,9 @@ logger = structlog.get_logger(__name__)
 
 PREFIJO_WHATSAPP = "whatsapp:"
 
+# Dado un cliente, a qué número del negocio le escribió por última vez
+ResolverRemitente = Callable[[str], Awaitable[str | None]]
+
 
 def validar_firma(url: str, params: dict[str, Any], firma: str, auth_token: str) -> bool:
     """Valida la cabecera X-Twilio-Signature de un webhook."""
@@ -27,13 +37,24 @@ def validar_firma(url: str, params: dict[str, Any], firma: str, auth_token: str)
     return RequestValidator(auth_token).validate(url, params, firma)
 
 
+def _con_prefijo(numero: str) -> str:
+    return numero if numero.startswith(PREFIJO_WHATSAPP) else f"{PREFIJO_WHATSAPP}{numero}"
+
+
 class WhatsAppTwilioAdapter(ChannelAdapter):
     canal = "whatsapp"
 
-    def __init__(self, account_sid: str, auth_token: str, from_number: str) -> None:
+    def __init__(
+        self,
+        account_sid: str,
+        auth_token: str,
+        from_number: str,
+        resolver_remitente: ResolverRemitente | None = None,
+    ) -> None:
         self._account_sid = account_sid
         self._auth_token = auth_token
         self._from = from_number
+        self._resolver = resolver_remitente
         self._client: Client | None = None
 
     @property
@@ -47,6 +68,14 @@ class WhatsAppTwilioAdapter(ChannelAdapter):
         user_id = payload.get("From", "").removeprefix(PREFIJO_WHATSAPP)
         message_sid = payload.get("MessageSid") or payload.get("SmsMessageSid")
         nombre_perfil = payload.get("ProfileName") or None
+        numero_negocio = payload.get("To", "").removeprefix(PREFIJO_WHATSAPP) or None
+        comunes = {
+            "canal": self.canal,
+            "user_id": user_id,
+            "message_sid": message_sid,
+            "nombre_perfil": nombre_perfil,
+            "numero_negocio": numero_negocio,
+        }
 
         # Selección interactiva: Twilio manda el id exacto del ítem tocado
         # (ListId para list-picker, ButtonPayload para quick-reply).
@@ -58,13 +87,10 @@ class WhatsAppTwilioAdapter(ChannelAdapter):
                 or payload.get("Body", "")
             )
             return IncomingMessage(
-                canal=self.canal,
-                user_id=user_id,
+                **comunes,
                 tipo="seleccion_interactiva",
                 contenido=etiqueta,
                 item_id=item_id,
-                message_sid=message_sid,
-                nombre_perfil=nombre_perfil,
             )
 
         # Nota de voz / audio adjunto.
@@ -72,42 +98,47 @@ class WhatsAppTwilioAdapter(ChannelAdapter):
         content_type = payload.get("MediaContentType0", "")
         if num_media > 0 and content_type.startswith("audio"):
             return IncomingMessage(
-                canal=self.canal,
-                user_id=user_id,
+                **comunes,
                 tipo="audio",
                 contenido=payload.get("Body", ""),
                 media_url=payload.get("MediaUrl0"),
                 media_content_type=content_type,
-                message_sid=message_sid,
-                nombre_perfil=nombre_perfil,
             )
 
-        return IncomingMessage(
-            canal=self.canal,
-            user_id=user_id,
-            tipo="texto",
-            contenido=payload.get("Body", ""),
-            message_sid=message_sid,
-            nombre_perfil=nombre_perfil,
-        )
+        return IncomingMessage(**comunes, tipo="texto", contenido=payload.get("Body", ""))
+
+    async def remitente_para(self, user_id: str) -> str:
+        """Número desde el que se le contesta a este cliente."""
+        if self._resolver is None:
+            return self._from
+        try:
+            numero = await self._resolver(user_id)
+        except Exception:
+            # Mejor contestar desde el número por defecto que no contestar
+            logger.exception("error_resolviendo_numero_del_negocio")
+            return self._from
+        return _con_prefijo(numero) if numero else self._from
 
     async def send(self, user_id: str, mensaje: OutgoingMessage) -> str | None:
         to = f"{PREFIJO_WHATSAPP}{user_id}"
+        desde = await self.remitente_para(user_id)
         if mensaje.ui is not None:
             try:
-                return await self._send_interactivo(to, mensaje)
+                return await self._send_interactivo(to, desde, mensaje)
             except Exception:
                 logger.exception("content_api_fallo_degradando_a_texto")
         # El SDK de Twilio es síncrono; se ejecuta fuera del event loop.
         msg = await asyncio.to_thread(
             self.client.messages.create,
-            from_=self._from,
+            from_=desde,
             to=to,
             body=self._render_texto(mensaje),
         )
         return msg.sid
 
-    async def _send_interactivo(self, to: str, mensaje: OutgoingMessage) -> str | None:
+    async def _send_interactivo(
+        self, to: str, desde: str, mensaje: OutgoingMessage
+    ) -> str | None:
         from ..services.twilio_content import crear_content_para_ui
 
         content_sid = await crear_content_para_ui(
@@ -115,7 +146,7 @@ class WhatsAppTwilioAdapter(ChannelAdapter):
         )
         msg = await asyncio.to_thread(
             self.client.messages.create,
-            from_=self._from,
+            from_=desde,
             to=to,
             content_sid=content_sid,
         )

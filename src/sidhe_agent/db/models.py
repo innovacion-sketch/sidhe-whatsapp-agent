@@ -103,7 +103,11 @@ class Mensaje(Base):
     """Auditoría/analytics. La memoria conversacional vive en los checkpoints."""
 
     __tablename__ = "mensajes"
-    __table_args__ = (Index("ix_mensajes_twilio_sid", "twilio_sid"),)
+    __table_args__ = (
+        Index("ix_mensajes_twilio_sid", "twilio_sid"),
+        # Cada respuesta busca a qué número escribió el cliente
+        Index("ix_mensajes_canal_user", "canal", "user_id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     canal: Mapped[str] = mapped_column(String(30), nullable=False)
@@ -113,6 +117,9 @@ class Mensaje(Base):
     contenido: Mapped[str] = mapped_column(Text, default="", nullable=False)
     item_id_seleccionado: Mapped[str | None] = mapped_column(String(80))
     twilio_sid: Mapped[str | None] = mapped_column(String(64))
+    # Número del negocio al que escribió el cliente (WhatsApp con varios
+    # números): la respuesta tiene que salir de ese mismo número.
+    numero_negocio: Mapped[str | None] = mapped_column(String(40))
     creado_en: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

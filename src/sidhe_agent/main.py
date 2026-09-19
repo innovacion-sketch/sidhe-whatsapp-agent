@@ -126,6 +126,7 @@ async def lifespan(app: FastAPI):
         account_sid=settings.twilio_account_sid,
         auth_token=settings.twilio_auth_token,
         from_number=settings.twilio_whatsapp_from,
+        resolver_remitente=_numero_al_que_escribio,
     )
     # Un adaptador por canal. Instagram y Messenger solo aparecen si tienen
     # token: sin el tramite de Meta terminado, esos canales no existen.
@@ -204,6 +205,7 @@ async def _guardar_mensaje(
     contenido: str,
     item_id: str | None = None,
     twilio_sid: str | None = None,
+    numero_negocio: str | None = None,
 ) -> None:
     async with get_session() as session:
         session.add(
@@ -215,9 +217,33 @@ async def _guardar_mensaje(
                 contenido=contenido,
                 item_id_seleccionado=item_id,
                 twilio_sid=twilio_sid,
+                numero_negocio=numero_negocio,
             )
         )
         await session.commit()
+
+
+async def _numero_al_que_escribio(user_id: str) -> str | None:
+    """Número del negocio al que este cliente escribió por última vez.
+
+    Con el 5164 y el 0202 activos, la respuesta tiene que salir del mismo
+    número: si no, al cliente le llega de un contacto que no tiene guardado.
+    None si nunca escribió desde que se guarda el dato (sale del de siempre).
+    """
+    async with get_session() as session:
+        return (
+            await session.execute(
+                select(Mensaje.numero_negocio)
+                .where(
+                    Mensaje.canal == "whatsapp",
+                    Mensaje.user_id == user_id,
+                    Mensaje.direccion == "in",
+                    Mensaje.numero_negocio.is_not(None),
+                )
+                .order_by(Mensaje.creado_en.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
 
 
 def _texto_de_respuesta(mensajes: list[Any]) -> str:
@@ -376,6 +402,7 @@ async def webhook_twilio_whatsapp(
         entrante.contenido,
         item_id=entrante.item_id,
         twilio_sid=entrante.message_sid,
+        numero_negocio=entrante.numero_negocio,
     )
     background_tasks.add_task(procesar_mensaje, request.app, entrante)
     return Response(content="<Response/>", media_type="application/xml")
@@ -450,7 +477,8 @@ async def enviar_recordatorios(
         try:
             sid = await enviar_recordatorio(
                 app.state.adapter.client,
-                settings.twilio_whatsapp_from,
+                # Desde el número por el que agendó, no siempre el de siempre
+                await app.state.adapter.remitente_para(cita.cliente_telefono),
                 cita.cliente_telefono,
                 settings.twilio_recordatorio_content_sid,
                 {

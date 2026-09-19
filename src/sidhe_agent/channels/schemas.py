@@ -30,6 +30,9 @@ class IncomingMessage(BaseModel):
     media_url: str | None = None
     media_content_type: str | None = None
     nombre_perfil: str | None = None
+    # Número del negocio al que escribió el cliente, cuando el canal tiene
+    # varios (WhatsApp con 5164 y 0202). La respuesta sale de ese número.
+    numero_negocio: str | None = None
 
 
 class Opcion(BaseModel):
