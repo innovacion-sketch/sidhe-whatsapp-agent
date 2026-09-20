@@ -112,6 +112,25 @@ def _log_resultados_de_tools(mensajes: list) -> None:
         )
 
 
+def _log_uso(respuesta: Any) -> None:
+    """Tokens de cada llamada al modelo, para saber en qué se va el gasto.
+
+    `cache_lectura` en cero llamada tras llamada significa que el caché del
+    system prompt no está pegando y se está pagando completo cada vez.
+    """
+    uso = getattr(respuesta, "usage_metadata", None)
+    if not uso:
+        return
+    detalle = uso.get("input_token_details") or {}
+    logger.info(
+        "uso_tokens",
+        entrada=uso.get("input_tokens"),
+        salida=uso.get("output_tokens"),
+        cache_lectura=detalle.get("cache_read"),
+        cache_escritura=detalle.get("cache_creation"),
+    )
+
+
 def make_agente(
     llm_con_tools: Runnable, system_prompt: str
 ) -> Callable[[AgentState], Awaitable[dict[str, Any]]]:
@@ -119,6 +138,7 @@ def make_agente(
         _log_resultados_de_tools(state["messages"])
         system = SystemMessage(content=_bloques_system(system_prompt, state))
         respuesta = await llm_con_tools.ainvoke([system, *state["messages"]])
+        _log_uso(respuesta)
         for llamada in getattr(respuesta, "tool_calls", []) or []:
             logger.info(
                 "tool_solicitada",

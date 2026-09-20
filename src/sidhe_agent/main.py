@@ -109,7 +109,7 @@ async def lifespan(app: FastAPI):
     )
     # LLM utilitario (extracción de perfil y resúmenes): determinista y barato
     llm_utilitario = ChatAnthropic(
-        model=settings.anthropic_model,
+        model=settings.anthropic_model_utilitario or settings.anthropic_model,
         api_key=settings.anthropic_api_key,
         max_tokens=600,
         temperature=0.0,
