@@ -35,7 +35,7 @@ from .db.session import dispose_engine, get_engine, get_session
 from .graph.builder import build_graph
 from .memory.long_term import crear_extractor
 from .observability import configurar_logging, enmascarar_user_id
-from .services import agenda, conversaciones, google_sheets, metricas
+from .services import agenda, conversaciones, cortesias, google_sheets, metricas
 from .services import respuestas_rapidas
 from .services.transcription import transcribir_audio
 from .services.twilio_content import enviar_recordatorio
@@ -323,6 +323,28 @@ async def procesar_mensaje(app: FastAPI, entrante: IncomingMessage) -> None:
                     "escalado": False,
                 },
             )
+
+        # Un "gracias" suelto no necesita al modelo. Solo si la conversación
+        # no tiene nada abierto: ver services/cortesias.py.
+        if entrante.tipo == "texto" and estado_atencion != conversaciones.REACTIVADO:
+            cortesia = cortesias.respuesta_si_es_acuse(
+                entrante.contenido, snapshot.values or {}, bool(snapshot.next)
+            )
+            if cortesia:
+                log.info("acuse_contestado_sin_modelo")
+                adaptador = _adaptador(app, entrante.canal) or app.state.adapter
+                sid = await adaptador.send(
+                    entrante.user_id, OutgoingMessage(texto=cortesia)
+                )
+                await _guardar_mensaje(
+                    "out",
+                    entrante.canal,
+                    entrante.user_id,
+                    "texto",
+                    cortesia,
+                    twilio_sid=sid,
+                )
+                return
 
         transcripcion = None
         if entrante.tipo == "audio":
