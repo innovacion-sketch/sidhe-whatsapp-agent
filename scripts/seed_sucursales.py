@@ -97,6 +97,12 @@ SUCURSALES_PRUEBA = [
 
 
 CAMPOS_OBLIGATORIOS = ("nombre", "ciudad", "estado", "zona", "direccion")
+NEGATIVOS = {"no", "false", "0", "cerrada", "inactiva"}
+
+
+def bandera_activa(valor: str) -> bool:
+    """Columna `activa` del CSV. Vacía = sigue abierta (el caso normal)."""
+    return valor.strip().lower() not in NEGATIVOS if valor.strip() else True
 
 
 def _desde_csv() -> tuple[list[dict], list[str]]:
@@ -132,6 +138,10 @@ def _desde_csv() -> tuple[list[dict], list[str]]:
                     or DIAS_TODOS,
                     "telefono": fila.get("telefono", "").strip() or None,
                     "calendar_id": fila.get("calendar_id", "").strip() or None,
+                    # Una sucursal que cierra se marca "no" en el CSV, no se
+                    # borra: sus citas y pedidos históricos siguen apuntando
+                    # a ella y el seed no debe volver a abrirla.
+                    "activa": bandera_activa(fila.get("activa", "")),
                 }
             )
     return filas, omitidas
@@ -162,15 +172,20 @@ async def main() -> None:
                     if valor in (None, "") and campo in CAMPOS_QUE_NO_SE_BORRAN:
                         continue
                     setattr(existente, campo, valor)
-                existente.activa = True
                 actualizadas += 1
             else:
-                session.add(Sucursal(**registro, activa=True))
+                session.add(Sucursal(**registro))
                 insertadas += 1
         await session.commit()
 
+    cerradas = [r["nombre"] for r in datos if not r.get("activa", True)]
     print(f"Origen: {origen}")
     print(f"Sucursales insertadas: {insertadas}, actualizadas: {actualizadas}")
+    if cerradas:
+        print(f"\nMarcadas como CERRADAS ({len(cerradas)}):")
+        for nombre in cerradas:
+            print(f"  - {nombre}")
+        print("  Revisa sus citas futuras con: python scripts/cerrar_sucursal.py")
     if omitidas:
         print(f"\nOMITIDAS ({len(omitidas)}) — completa el CSV y re-ejecuta:")
         for linea in omitidas:
