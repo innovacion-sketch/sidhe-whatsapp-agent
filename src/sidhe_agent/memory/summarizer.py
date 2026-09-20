@@ -20,8 +20,10 @@ from langchain_core.messages import (
 
 logger = structlog.get_logger(__name__)
 
-UMBRAL_MENSAJES = 30
-MENSAJES_A_CONSERVAR = 10
+# Cada mensaje reenvía todo el historial vivo, así que un historial largo se
+# paga en cada turno. Resumir antes sale más barato que arrastrarlo.
+UMBRAL_MENSAJES = 20
+MENSAJES_A_CONSERVAR = 8
 
 PROMPT_RESUMEN = """\
 Resume la siguiente conversación de WhatsApp entre un cliente y el asistente \

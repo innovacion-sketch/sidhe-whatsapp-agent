@@ -7,6 +7,7 @@ from sidhe_agent.graph.nodes import make_actualizar_memoria
 from sidhe_agent.memory.long_term import PerfilExtraido, leer_perfil
 from sidhe_agent.memory.summarizer import (
     MENSAJES_A_CONSERVAR,
+    UMBRAL_MENSAJES,
     make_resumir,
     necesita_resumen,
     particionar_mensajes,
@@ -87,8 +88,10 @@ def _conversacion_larga(n_pares: int):
 
 
 def test_umbral_de_resumen():
-    assert not necesita_resumen(_conversacion_larga(15))  # 30 mensajes
-    assert necesita_resumen(_conversacion_larga(16))  # 32 mensajes
+    # Cada "par" es un mensaje del cliente y su respuesta
+    justo = UMBRAL_MENSAJES // 2
+    assert not necesita_resumen(_conversacion_larga(justo))
+    assert necesita_resumen(_conversacion_larga(justo + 1))
 
 
 def test_particion_no_parte_secuencias():

@@ -56,6 +56,27 @@ def test_el_llm_principal_no_manda_temperature():
     assert llm.thinking == {"type": "disabled"}
 
 
+def test_el_rag_descarta_fragmentos_que_no_vienen_al_caso():
+    """Un fragmento poco parecido no ayuda y se reenvía en cada mensaje."""
+    from sidhe_agent.tools.conocimiento import MAX_RESULTADOS, filtrar_resultados
+
+    filas = [
+        ("La garantía cubre 90 días", "Guía", 0.05),  # relevancia 0.95
+        ("Las plantillas son de TPU", "Guía", 0.40),  # 0.60
+        ("Horario de Liverpool Polanco", "Guía", 0.80),  # 0.20, fuera
+    ]
+    resultados = filtrar_resultados(filas)
+
+    assert [r["relevancia"] for r in resultados] == [0.95, 0.6]
+    assert len(resultados) <= MAX_RESULTADOS
+
+
+def test_el_rag_no_devuelve_relleno_cuando_nada_coincide():
+    from sidhe_agent.tools.conocimiento import filtrar_resultados
+
+    assert filtrar_resultados([("texto cualquiera", "Guía", 0.9)]) == []
+
+
 def test_las_tareas_internas_usan_un_modelo_mas_barato():
     ajustes = Settings(anthropic_api_key="test")
     assert ajustes.anthropic_model_utilitario != ajustes.anthropic_model

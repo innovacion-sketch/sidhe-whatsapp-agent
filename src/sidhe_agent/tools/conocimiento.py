@@ -15,7 +15,21 @@ from ..services.embeddings import embed_textos
 
 logger = structlog.get_logger(__name__)
 
-TOP_K = 5
+TOP_K = 4
+# Un fragmento poco parecido a la pregunta no ayuda a contestar y sí se paga:
+# entra en el contexto y se reenvía en cada mensaje posterior de esa charla.
+RELEVANCIA_MINIMA = 0.35
+MAX_RESULTADOS = 3
+
+
+def filtrar_resultados(filas: list[tuple]) -> list[dict]:
+    """Deja solo los fragmentos que de verdad se parecen a la pregunta."""
+    resultados = [
+        {"texto": texto, "fuente": titulo, "relevancia": round(1 - dist, 3)}
+        for texto, titulo, dist in filas
+    ]
+    utiles = [r for r in resultados if r["relevancia"] >= RELEVANCIA_MINIMA]
+    return utiles[:MAX_RESULTADOS]
 
 
 async def _buscar_conocimiento(query: str) -> dict:
@@ -40,16 +54,10 @@ async def _buscar_conocimiento(query: str) -> dict:
                     .limit(TOP_K)
                 )
             ).all()
-        return {
-            "resultados": [
-                {
-                    "texto": texto,
-                    "fuente": titulo,
-                    "relevancia": round(1 - dist, 3),
-                }
-                for texto, titulo, dist in filas
-            ]
-        }
+        resultados = filtrar_resultados(list(filas))
+        if not resultados:
+            return {"resultados": [], "nota": "sin coincidencias en la base"}
+        return {"resultados": resultados}
     except (ValueError, NotImplementedError) as exc:
         # Proveedor de embeddings mal configurado o stub
         logger.warning("rag_no_configurado", detalle=str(exc))
@@ -64,7 +72,7 @@ async def buscar_conocimiento(query: str) -> dict:
     """Busca información adicional en la base documental de Sidhe Group.
 
     Úsala SOLO cuando la respuesta no esté en las preguntas frecuentes del
-    system prompt. Devuelve hasta 5 fragmentos con su fuente y relevancia
+    system prompt. Devuelve hasta 3 fragmentos con su fuente y relevancia
     (0 a 1). Usa únicamente fragmentos relevantes a la pregunta; si no hay
     resultados útiles, dilo honestamente al cliente y ofrece escalar a un
     asesor humano.

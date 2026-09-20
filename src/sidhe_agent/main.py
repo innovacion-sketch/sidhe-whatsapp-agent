@@ -46,7 +46,9 @@ logger = structlog.get_logger(__name__)
 RUTA_SYSTEM_PROMPT = Path(__file__).parent / "graph" / "prompts" / "system.md"
 RUTA_PANEL = Path(__file__).parent / "panel" / "index.html"
 MAX_DIAS_PANEL = 365
-LIMITE_PASOS_GRAFO = 30
+# Tope de pasos por mensaje. Cada paso es una llamada al modelo con todo el
+# contexto: un agente en bucle es el gasto más caro y más invisible que hay.
+LIMITE_PASOS_GRAFO = 16
 NOTA_ESCALAMIENTO_RESUELTO = (
     "[nota del sistema] Un asesor humano ya atendió el escalamiento anterior "
     "y la conversación vuelve a estar a tu cargo. Retoma la atención con "
