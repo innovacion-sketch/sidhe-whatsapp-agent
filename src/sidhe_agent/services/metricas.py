@@ -18,6 +18,7 @@ from sqlalchemy import distinct, func, select, text
 from ..config import get_settings
 from ..db.models import Cita, Escalamiento, Mensaje, Slot, Sucursal
 from ..db.session import get_session
+from .consumo import CONSUMO
 
 MAX_SUCURSALES_TOP = 10
 
@@ -192,6 +193,8 @@ async def calcular(dias: int = 30) -> dict:
             "top_sucursales": await _top_sucursales(session, desde),
             "proximas_citas": await _proximas_citas(session),
             "primera_respuesta_seg": await _primera_respuesta_seg(session, desde),
+            # Gasto en el modelo desde el último Deploy (no depende de `dias`)
+            "consumo": CONSUMO.resumen(get_settings().anthropic_model),
         }
     clientes = resumen["clientes"]
     datos["conversion"] = (

@@ -23,6 +23,7 @@ from ..graph.state import AgentState
 from ..memory.long_term import PROMPT_EXTRACCION, guardar_perfil, leer_perfil
 from ..memory.summarizer import _transcript
 from ..observability import enmascarar_user_id
+from ..services.consumo import CONSUMO
 
 logger = structlog.get_logger(__name__)
 
@@ -139,6 +140,12 @@ def _log_uso(respuesta: Any) -> None:
     if not uso:
         return
     detalle = uso.get("input_token_details") or {}
+    CONSUMO.registrar(
+        entrada=uso.get("input_tokens") or 0,
+        salida=uso.get("output_tokens") or 0,
+        cache_lectura=detalle.get("cache_read") or 0,
+        cache_escritura=detalle.get("cache_creation") or 0,
+    )
     logger.info(
         "uso_tokens",
         entrada=uso.get("input_tokens"),
