@@ -83,14 +83,20 @@ async def main() -> None:
                 .order_by(Slot.fecha, Slot.hora_inicio)
             )
         ).all()
+        # Un horario libre puede seguir teniendo una cita CANCELADA colgando:
+        # esos no se pueden borrar (la base no lo permite) y tampoco hace
+        # falta, porque una sucursal cerrada ya no ofrece horarios.
+        sin_historial = ~(
+            select(Cita.id).where(Cita.slot_id == Slot.id).exists()
+        )
+        condicion_borrables = (
+            Slot.sucursal_id == sucursal.id,
+            Slot.fecha >= hoy,
+            Slot.reservados == 0,
+            sin_historial,
+        )
         libres = (
-            await session.execute(
-                select(Slot).where(
-                    Slot.sucursal_id == sucursal.id,
-                    Slot.fecha >= hoy,
-                    Slot.reservados == 0,
-                )
-            )
+            await session.execute(select(Slot).where(*condicion_borrables))
         ).scalars().all()
 
         print(f"\nCitas futuras confirmadas: {len(citas)}")
@@ -99,7 +105,7 @@ async def main() -> None:
                 f"  - {fecha_legible(slot.fecha)} {slot.hora_inicio.strftime('%H:%M')}"
                 f" · {cita.cliente_nombre} · {cita.cliente_telefono} (folio {cita.id})"
             )
-        print(f"Horarios libres a futuro: {len(libres)}")
+        print(f"Horarios libres a futuro que se pueden borrar: {len(libres)}")
 
         if not args.aplicar:
             print("\nNo toque nada. Corre otra vez con --aplicar para cerrarla.")
@@ -109,21 +115,17 @@ async def main() -> None:
             return
 
         sucursal.activa = False
-        borrados = (
-            await session.execute(
-                delete(Slot).where(
-                    Slot.sucursal_id == sucursal.id,
-                    Slot.fecha >= hoy,
-                    Slot.reservados == 0,
-                )
-            )
-        ).rowcount
         canceladas = 0
         if args.cancelar_citas:
-            for cita, _slot in citas:
+            for cita, slot in citas:
                 cita.estado = "cancelada"
+                # Igual que al cancelar desde el bot: el lugar se libera
+                slot.reservados = max(0, slot.reservados - 1)
                 await borrar_evento(sucursal.calendar_id, cita.google_event_id)
                 canceladas += 1
+        borrados = (
+            await session.execute(delete(Slot).where(*condicion_borrables))
+        ).rowcount
         await session.commit()
 
     print(f"\nListo. {sucursal.nombre} quedo marcada como CERRADA.")
