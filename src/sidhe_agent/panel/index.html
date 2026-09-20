@@ -98,6 +98,11 @@
   .item .quien { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; }
   .item .previo { color: var(--suave); font-size: 12px; margin-top: 2px;
                   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Fragmento del mensaje donde coincidio la busqueda */
+  .item .coincide { color: var(--suave); font-size: 12px; margin-top: 4px;
+                    padding-left: 7px; border-left: 2px solid #4b6a3a; }
+  .item .coincide mark { background: #4b6a3a; color: #eaf3e2; padding: 0 2px;
+                         border-radius: 2px; }
   .item .pie { margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap; }
   .etiqueta { font-size: 10px; padding: 1px 7px; border-radius: 999px;
               text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
@@ -235,7 +240,7 @@
 
 <main id="vistaBandeja" hidden>
   <div class="barra-bandeja">
-    <input id="buscar" placeholder="Buscar por telefono..." style="flex:1">
+    <input id="buscar" placeholder="Buscar por telefono o palabra..." style="flex:1">
     <button id="refrescar">Refrescar</button>
   </div>
   <div class="filtros" id="filtros" role="tablist" aria-label="Filtrar conversaciones"></div>
@@ -304,6 +309,18 @@ function esc(t) {
   return String(t === null || t === undefined ? "" : t)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+// Marca el termino buscado dentro del fragmento. Escapa SIEMPRE antes de
+// resaltar: el texto viene de mensajes de clientes.
+function resaltar(texto) {
+  const limpio = esc(texto);
+  const termino = $("buscar").value.trim();
+  if (!termino) return limpio;
+  const patron = esc(termino).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return limpio.replace(new RegExp(patron, "gi"), function (hallado) {
+    return "<mark>" + hallado + "</mark>";
+  });
 }
 
 async function api(ruta, opciones) {
@@ -522,6 +539,8 @@ async function cargarLista() {
       '<span class="nota">' + hora(c.ultima_fecha) + '</span></div>' +
       '<div class="previo">' + (c.ultima_direccion === "in" ? "" : "Tú: ") +
       esc(c.ultimo_mensaje) + '</div>' +
+      (c.coincidencia
+        ? '<div class="coincide">' + resaltar(c.coincidencia) + '</div>' : "") +
       '<div class="pie"><span class="etiqueta et-canal">' + esc(c.canal) + '</span>' +
       etiquetaEstado(c) + '</div></div>';
   }).join("");

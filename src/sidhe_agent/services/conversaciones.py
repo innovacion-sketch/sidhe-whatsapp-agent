@@ -10,7 +10,9 @@ el agente o si un humano tomó el control desde el panel.
 import datetime
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select, tuple_, update
+import unicodedata
+
+from sqlalchemy import func, or_, select, tuple_, update
 
 from ..config import get_settings
 from ..db.models import CierreConversacion, Escalamiento, Mensaje
@@ -35,6 +37,9 @@ ESTADOS = (ESPERANDO_ASESOR, ATENDIDA, CERRADA, CON_BOT)
 # cliente esperando no desaparece de "Esperando asesor" solo porque entraron
 # 50 conversaciones nuevas del bot después de la suya.
 CANDIDATAS = 300
+
+# Cuánto texto se muestra alrededor de la palabra encontrada
+ANCHO_RECORTE = 140
 
 
 def _ahora() -> datetime.datetime:
@@ -198,12 +203,37 @@ def filtrar(todas: list[dict], estado: str, limite: int) -> dict:
     return {"conversaciones": visibles[:limite], "conteos": conteos}
 
 
+def _sin_acentos(texto: str) -> str:
+    descompuesto = unicodedata.normalize("NFD", texto.lower())
+    return "".join(c for c in descompuesto if not unicodedata.combining(c))
+
+
+def recorte(texto: str, termino: str, ancho: int = ANCHO_RECORTE) -> str:
+    """Un pedazo del mensaje alrededor de la palabra buscada.
+
+    Sin esto, una coincidencia a la mitad de un mensaje largo no se vería:
+    el asesor tendría que abrir la conversación para saber por qué salió.
+    """
+    texto = texto or ""
+    posicion = _sin_acentos(texto).find(_sin_acentos(termino.strip()))
+    if posicion < 0:
+        return texto[:ancho]
+    inicio = max(0, posicion - ancho // 3)
+    fin = min(len(texto), posicion + len(termino) + (2 * ancho) // 3)
+    return ("…" if inicio else "") + texto[inicio:fin] + ("…" if fin < len(texto) else "")
+
+
 async def listar(buscar: str = "", limite: int = 50, estado: str = "") -> dict:
     """Conversaciones por actividad reciente, con su estado y conteos.
+
+    `buscar` mira el teléfono Y el texto de todos los mensajes, sin importar
+    acentos ni mayúsculas; de cada conversación que coincide se devuelve el
+    fragmento donde coincidió, en `coincidencia`.
 
     `estado` vacío o desconocido = sin filtro.
     """
     limite = max(1, min(limite, MAX_CONVERSACIONES))
+    termino = buscar.strip()
     ultimo = func.max(Mensaje.creado_en).label("ultimo")
     consulta = (
         select(Mensaje.canal, Mensaje.user_id, ultimo, func.count(Mensaje.id))
@@ -211,14 +241,41 @@ async def listar(buscar: str = "", limite: int = 50, estado: str = "") -> dict:
         .order_by(ultimo.desc())
         .limit(CANDIDATAS)
     )
-    if buscar.strip():
-        patron = f"%{buscar.strip().lower()}%"
-        consulta = consulta.having(func.lower(func.min(Mensaje.user_id)).like(patron))
+    coincide_texto = None
+    if termino:
+        patron = func.unaccent(f"%{termino.lower()}%")
+        coincide_texto = func.unaccent(func.lower(Mensaje.contenido)).like(patron)
+        # bool_or: basta con que UN mensaje de la conversación coincida, pero
+        # los totales y el último mensaje siguen siendo los de siempre.
+        consulta = consulta.having(
+            func.bool_or(
+                or_(
+                    func.unaccent(func.lower(Mensaje.user_id)).like(patron),
+                    coincide_texto,
+                )
+            )
+        )
 
     async with get_session() as session:
         filas = (await session.execute(consulta)).all()
         pares = [(canal, user_id) for canal, user_id, _, _ in filas]
         estados = await _estados(session, pares)
+
+        coincidencias: dict[tuple[str, str], str] = {}
+        if termino and pares:
+            # El mensaje coincidente más reciente de cada conversación
+            for canal, user_id, contenido in (
+                await session.execute(
+                    select(Mensaje.canal, Mensaje.user_id, Mensaje.contenido)
+                    .where(tuple_(Mensaje.canal, Mensaje.user_id).in_(pares))
+                    .where(coincide_texto)
+                    .distinct(Mensaje.canal, Mensaje.user_id)
+                    .order_by(
+                        Mensaje.canal, Mensaje.user_id, Mensaje.creado_en.desc()
+                    )
+                )
+            ).all():
+                coincidencias[(canal, user_id)] = recorte(contenido, termino)
 
         ultimos = {}
         if pares:
@@ -252,6 +309,8 @@ async def listar(buscar: str = "", limite: int = 50, estado: str = "") -> dict:
                 "estado": estado_conv,
                 "esperando_desde": desde.isoformat() if desde else None,
                 "bot_pausado": estado_conv in (ESPERANDO_ASESOR, ATENDIDA),
+                # Vacío si la coincidencia fue por teléfono, no por texto
+                "coincidencia": coincidencias.get(par, ""),
             }
         )
     return filtrar(todas, estado, limite)
