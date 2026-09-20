@@ -86,6 +86,22 @@ def _cargar_system_prompt() -> str:
     return RUTA_SYSTEM_PROMPT.read_text(encoding="utf-8")
 
 
+def crear_llm_principal(settings: Any) -> ChatAnthropic:
+    """El modelo que atiende al cliente.
+
+    Sin `temperature`: los modelos de Anthropic 4.6 en adelante la rechazan
+    con error 400. Sin razonamiento extendido: en Sonnet 5 viene encendido
+    por defecto y esas respuestas se cobran como salida, cuando hoy el bot
+    contesta bien sin él. Si algún día se quiere, se cambia aquí.
+    """
+    return ChatAnthropic(
+        model=settings.anthropic_model,
+        api_key=settings.anthropic_api_key,
+        max_tokens=1024,
+        thinking={"type": "disabled"},
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
@@ -101,12 +117,7 @@ async def lifespan(app: FastAPI):
     )
     await store.setup()
 
-    llm = ChatAnthropic(
-        model=settings.anthropic_model,
-        api_key=settings.anthropic_api_key,
-        max_tokens=1024,
-        temperature=0.3,
-    )
+    llm = crear_llm_principal(settings)
     # LLM utilitario (extracción de perfil y resúmenes): determinista y barato
     llm_utilitario = ChatAnthropic(
         model=settings.anthropic_model_utilitario or settings.anthropic_model,

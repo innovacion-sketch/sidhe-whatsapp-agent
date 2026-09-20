@@ -47,7 +47,7 @@ class Settings(BaseSettings):
 
     # Anthropic
     anthropic_api_key: str = ""
-    anthropic_model: str = "claude-sonnet-4-6"
+    anthropic_model: str = "claude-sonnet-5"
     # Modelo de las tareas internas que el cliente nunca ve (extracción de
     # perfil y resúmenes). Corre en CADA mensaje, así que con el modelo
     # grande se lleva casi un tercio del gasto sin mejorar la respuesta.

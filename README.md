@@ -7,7 +7,7 @@ de corto y largo plazo, transcribe notas de voz y (Fase 2) agenda citas de
 estudio de pisada con botones interactivos.
 
 **Stack:** Python 3.12 + uv · FastAPI · LangGraph (checkpointer y store sobre
-Postgres) · Claude Sonnet (`claude-sonnet-4-6`, prompt caching) · PostgreSQL 16
+Postgres) · Claude Sonnet (`claude-sonnet-5`, prompt caching) · PostgreSQL 16
 + pgvector · Twilio WhatsApp (Content API) · Whisper vía Groq · Docker.
 
 ## Estado de fases
@@ -108,7 +108,8 @@ Notas de operación:
 |---|---|
 | `DATABASE_URL` | DSN de Postgres (`postgresql://...`), único para negocio y memoria |
 | `ANTHROPIC_API_KEY` | API key de Anthropic |
-| `ANTHROPIC_MODEL` | Default `claude-sonnet-4-6` |
+| `ANTHROPIC_MODEL` | Default `claude-sonnet-5` |
+| `ANTHROPIC_MODEL_UTILITARIO` | Modelo de tareas internas (perfil/resúmenes). Default `claude-haiku-4-5` |
 | `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` | Credenciales de Twilio |
 | `TWILIO_WHATSAPP_FROM` | `whatsapp:+5215638955164` |
 | `TWILIO_VALIDATE_SIGNATURE` | `true` en producción |

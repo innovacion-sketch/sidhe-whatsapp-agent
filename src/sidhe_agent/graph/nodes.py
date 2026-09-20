@@ -28,6 +28,23 @@ logger = structlog.get_logger(__name__)
 
 # Ventana del turno reciente que ve el extractor de perfil
 MENSAJES_PARA_EXTRACCION = 8
+# Cada cuántos mensajes del cliente se extrae el perfil
+CADA_CUANTOS_MENSAJES = 3
+
+
+def toca_extraer(mensajes: list) -> bool:
+    """Si en este turno toca extraer el perfil.
+
+    Extraer en cada mensaje es una llamada al modelo por cada línea que
+    escribe el cliente, y casi siempre no hay nada nuevo que guardar. No se
+    pierde información: el extractor lee los últimos MENSAJES_PARA_EXTRACCION,
+    así que lo que dijo en medio entra en la siguiente pasada. El primer
+    mensaje sí se extrae, para no llegar tarde al nombre del cliente.
+    """
+    del_cliente = sum(1 for m in mensajes if isinstance(m, HumanMessage))
+    if not del_cliente:
+        return False
+    return del_cliente == 1 or del_cliente % CADA_CUANTOS_MENSAJES == 0
 
 
 def make_cargar_memoria(
@@ -160,6 +177,8 @@ def make_actualizar_memoria(
 
     async def actualizar_memoria(state: AgentState) -> dict[str, Any]:
         if extractor is None or store is None:
+            return {}
+        if not toca_extraer(state["messages"]):
             return {}
         try:
             fragmento = _transcript(state["messages"][-MENSAJES_PARA_EXTRACCION:])
