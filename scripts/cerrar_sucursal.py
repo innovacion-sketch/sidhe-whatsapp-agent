@@ -108,9 +108,12 @@ async def main() -> None:
         print(f"Horarios libres a futuro que se pueden borrar: {len(libres)}")
 
         if not args.aplicar:
-            print("\nNo toque nada. Corre otra vez con --aplicar para cerrarla.")
-            if citas:
-                print("Esas citas hay que reubicarlas o avisarles ANTES de cerrar.")
+            if not sucursal.activa and not citas and not libres:
+                print("\nYa esta cerrada y no quedo nada pendiente. Nada que hacer.")
+            else:
+                print("\nNo toque nada. Corre otra vez con --aplicar para cerrarla.")
+                if citas:
+                    print("Esas citas hay que reubicarlas o avisarles ANTES de cerrar.")
             await dispose_engine()
             return
 
