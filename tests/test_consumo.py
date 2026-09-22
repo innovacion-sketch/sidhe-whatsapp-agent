@@ -75,6 +75,30 @@ def test_el_desglose_suma_los_dos_modelos():
     ]
 
 
+def test_el_desglose_aguanta_lo_que_devuelve_postgres():
+    """sum() de un entero grande llega como Decimal, no como int."""
+    import json
+    from decimal import Decimal
+
+    from sidhe_agent.services.consumo import desglose
+
+    filas = [
+        (
+            "claude-sonnet-5",
+            Decimal("100"),
+            Decimal("1000000"),
+            Decimal("100000"),
+            Decimal("900000"),
+            Decimal("0"),
+        )
+    ]
+    resumen = desglose(filas, 30)
+
+    assert resumen["costo_usd"] == 1.38
+    # Y tiene que poder viajar al panel como JSON
+    assert json.dumps(resumen)
+
+
 def test_el_desglose_reporta_la_salida_promedio():
     from sidhe_agent.services.consumo import desglose
 

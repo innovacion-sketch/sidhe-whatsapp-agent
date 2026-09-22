@@ -206,12 +206,15 @@ def desglose(filas: list, dias: int) -> dict:
     costo_total = 0.0
     se_pudo_costear = bool(filas)
     for modelo, llamadas, entrada, salida, lectura, escritura in filas:
+        # int() a propósito: Postgres devuelve las sumas de enteros grandes
+        # como Decimal, que ni se multiplica por los precios (float) ni se
+        # serializa a JSON.
         uno = Consumo(
-            llamadas=llamadas or 0,
-            entrada=entrada or 0,
-            salida=salida or 0,
-            cache_lectura=lectura or 0,
-            cache_escritura=escritura or 0,
+            llamadas=int(llamadas or 0),
+            entrada=int(entrada or 0),
+            salida=int(salida or 0),
+            cache_lectura=int(lectura or 0),
+            cache_escritura=int(escritura or 0),
         )
         total.llamadas += uno.llamadas
         total.entrada += uno.entrada
