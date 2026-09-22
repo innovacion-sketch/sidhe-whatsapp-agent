@@ -15,10 +15,10 @@ import datetime
 from zoneinfo import ZoneInfo
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from ..config import get_settings
-from ..db.models import Slot, Sucursal
+from ..db.models import Cita, Slot, Sucursal
 from ..db.session import get_session
 from . import asistencias
 
@@ -89,7 +89,7 @@ async def asegurar_slots(dias: int, minutos: int = 60) -> int:
     # como siempre, que es mejor que quedarse sin citas por falta de datos.
     sin_personal = await asistencias.dias_sin_personal(hoy, fechas[-1])
 
-    creados = 0
+    creados = borrados = 0
     async with get_session() as session:
         sucursales = (
             await session.execute(select(Sucursal).where(Sucursal.activa.is_(True)))
@@ -119,7 +119,28 @@ async def asegurar_slots(dias: int, minutos: int = 60) -> int:
             session.add_all(Slot(**n) for n in nuevos)
             creados += len(nuevos)
 
+            # Los días que el rol cerró pueden tener horarios generados antes
+            # de que se cargara ese rol. Se quitan los que nadie reservó; los
+            # que ya tienen cita NO se tocan: esa cita hay que atenderla o
+            # reubicarla a mano, y para eso está la alerta por correo.
+            cerrados = [f for f in fechas if (sucursal.nombre, f) in sin_personal]
+            if cerrados:
+                borrados += (
+                    await session.execute(
+                        delete(Slot).where(
+                            Slot.sucursal_id == sucursal.id,
+                            Slot.fecha.in_(cerrados),
+                            Slot.reservados == 0,
+                            ~select(Cita.id)
+                            .where(Cita.slot_id == Slot.id)
+                            .exists(),
+                        )
+                    )
+                ).rowcount
+
         await session.commit()
+    if borrados:
+        logger.info("horarios_retirados_por_falta_de_personal", horarios=borrados)
     return creados
 
 
