@@ -24,8 +24,9 @@ from . import asistencias, correo
 
 logger = structlog.get_logger(__name__)
 
-# (fecha, sucursal) ya avisados, para no repetir el mismo día
-_avisadas: set[tuple[datetime.date, str]] = set()
+# Lo ya avisado, para no repetir: (fecha, sucursal) para el aviso del día y
+# ("cerrado", fecha, sucursal) para el anticipado
+_avisadas: set[tuple] = set()
 
 
 def redactar(sucursal: str, fecha: datetime.date, citas: list[dict], hora: str) -> tuple[str, str]:
@@ -50,29 +51,105 @@ def redactar(sucursal: str, fecha: datetime.date, citas: list[dict], hora: str) 
     return asunto, "\n".join(lineas)
 
 
-async def citas_de_hoy(hoy: datetime.date) -> dict[str, list[dict]]:
-    """Citas confirmadas de hoy, agrupadas por nombre de sucursal."""
+def redactar_dia_cerrado(
+    sucursal: str, fecha: datetime.date, citas: list[dict]
+) -> tuple[str, str]:
+    """Aviso anticipado: ese día el rol dice que esa sucursal no abre."""
+    asunto = (
+        f"⚠️ {len(citas)} cita(s) el {fecha.strftime('%d/%m')} en {sucursal}, "
+        "sin personal programado"
+    )
+    lineas = [
+        f"El rol de personal no tiene a nadie en {sucursal} "
+        f"el {fecha_legible(fecha)},",
+        f"y hay {len(citas)} cita(s) agendadas para ese día:",
+        "",
+    ]
+    for cita in citas:
+        lineas.append(
+            f"  {cita['hora']}  {cita['cliente']}  {cita['telefono']}  "
+            f"(folio {cita['folio']})"
+        )
+    lineas += [
+        "",
+        "Hay tiempo de reubicarlas o de asignar a alguien.",
+        "El bot ya dejó de ofrecer ese día en esa sucursal.",
+        "",
+        "-- Bot de WhatsApp de Sidhe",
+    ]
+    return asunto, "\n".join(lineas)
+
+
+async def _citas_confirmadas(desde: datetime.date, hasta: datetime.date) -> list[tuple]:
     async with get_session() as session:
-        filas = (
+        return (
             await session.execute(
                 select(Cita, Slot, Sucursal)
                 .join(Slot, Cita.slot_id == Slot.id)
                 .join(Sucursal, Cita.sucursal_id == Sucursal.id)
-                .where(Cita.estado == "confirmada", Slot.fecha == hoy)
-                .order_by(Slot.hora_inicio)
+                .where(
+                    Cita.estado == "confirmada",
+                    Slot.fecha >= desde,
+                    Slot.fecha <= hasta,
+                )
+                .order_by(Slot.fecha, Slot.hora_inicio)
             )
         ).all()
+
+
+def _resumir(cita: Cita, slot: Slot) -> dict:
+    return {
+        "hora": slot.hora_inicio.strftime("%H:%M"),
+        "cliente": cita.cliente_nombre,
+        "telefono": cita.cliente_telefono,
+        "folio": cita.id,
+    }
+
+
+async def citas_de_hoy(hoy: datetime.date) -> dict[str, list[dict]]:
+    """Citas confirmadas de hoy, agrupadas por nombre de sucursal."""
     por_sucursal: dict[str, list[dict]] = {}
-    for cita, slot, sucursal in filas:
-        por_sucursal.setdefault(sucursal.nombre, []).append(
-            {
-                "hora": slot.hora_inicio.strftime("%H:%M"),
-                "cliente": cita.cliente_nombre,
-                "telefono": cita.cliente_telefono,
-                "folio": cita.id,
-            }
-        )
+    for cita, slot, sucursal in await _citas_confirmadas(hoy, hoy):
+        por_sucursal.setdefault(sucursal.nombre, []).append(_resumir(cita, slot))
     return por_sucursal
+
+
+async def avisar_dias_cerrados(dias: int = 21) -> int:
+    """Citas que caen en días que el rol da por cerrados.
+
+    Esas no las agarra la revisión de checadas: ahí nadie estaba programado,
+    así que nadie "faltó" y ningún sistema lo nota. La cita existe porque se
+    agendó antes de que se cargara el rol, y el cliente va a viajar a una
+    tienda cerrada si nadie le habla.
+    """
+    hoy = datetime.datetime.now(ZoneInfo(get_settings().tz)).date()
+    hasta = hoy + datetime.timedelta(days=dias)
+    cerrados = await asistencias.dias_sin_personal(hoy, hasta)
+    if not cerrados:
+        return 0
+
+    agrupadas: dict[tuple[str, datetime.date], list[dict]] = {}
+    for cita, slot, sucursal in await _citas_confirmadas(hoy, hasta):
+        if (sucursal.nombre, slot.fecha) in cerrados:
+            agrupadas.setdefault((sucursal.nombre, slot.fecha), []).append(
+                _resumir(cita, slot)
+            )
+
+    enviados = 0
+    for (sucursal, fecha), citas in sorted(agrupadas.items()):
+        if ("cerrado", fecha, sucursal) in _avisadas:
+            continue
+        asunto, cuerpo = redactar_dia_cerrado(sucursal, fecha, citas)
+        if await correo.enviar(asunto, cuerpo):
+            _avisadas.add(("cerrado", fecha, sucursal))
+            enviados += 1
+            logger.warning(
+                "citas_en_dia_sin_personal",
+                sucursal=sucursal,
+                fecha=fecha.isoformat(),
+                citas=len(citas),
+            )
+    return enviados
 
 
 async def revisar() -> int:
@@ -116,6 +193,8 @@ async def vigilar(cada_minutos: int = 30, espera_inicial: float = 60.0) -> None:
             hora = datetime.datetime.now(ZoneInfo(ajustes.tz)).hour
             if ajustes.alerta_citas_desde <= hora <= ajustes.alerta_citas_hasta:
                 await revisar()
+                # Y los días que el rol ya dio por cerrados, con anticipación
+                await avisar_dias_cerrados()
         except asyncio.CancelledError:
             raise
         except Exception:

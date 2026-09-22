@@ -135,6 +135,52 @@ async def test_no_avisa_dos_veces_por_la_misma_sucursal_el_mismo_dia():
     alertas_citas._avisadas.clear()
 
 
+def test_el_aviso_anticipado_dice_que_hay_tiempo():
+    citas = [
+        {"hora": "13:00", "cliente": "José Belmares", "telefono": "+5218115771586", "folio": 93},
+    ]
+    asunto, cuerpo = alertas_citas.redactar_dia_cerrado(
+        "Liverpool Galerías Monterrey", MANANA, citas
+    )
+
+    assert "sin personal programado" in asunto
+    assert "+5218115771586" in cuerpo and "folio 93" in cuerpo
+    assert "reubicarlas" in cuerpo
+
+
+async def test_avisa_de_citas_en_dias_que_el_rol_cerro():
+    """Nadie programado = nadie falta = ningún otro sistema lo nota."""
+    alertas_citas._avisadas.clear()
+
+    class FilaFalsa:
+        def __init__(self, **kw):
+            self.__dict__.update(kw)
+
+    cita = FilaFalsa(id=93, cliente_nombre="José Belmares", cliente_telefono="+52181")
+    slot = FilaFalsa(fecha=MANANA, hora_inicio=datetime.time(13, 0))
+    sucursal = FilaFalsa(nombre="Liverpool Galerías Monterrey")
+
+    with (
+        patch.object(
+            alertas_citas.asistencias,
+            "dias_sin_personal",
+            AsyncMock(return_value={("Liverpool Galerías Monterrey", MANANA)}),
+        ),
+        patch.object(
+            alertas_citas,
+            "_citas_confirmadas",
+            AsyncMock(return_value=[(cita, slot, sucursal)]),
+        ),
+        patch.object(alertas_citas.correo, "enviar", AsyncMock(return_value=True)) as enviar,
+    ):
+        assert await alertas_citas.avisar_dias_cerrados() == 1
+        # No se repite en la siguiente vuelta del ciclo
+        assert await alertas_citas.avisar_dias_cerrados() == 0
+
+    assert enviar.await_count == 1
+    alertas_citas._avisadas.clear()
+
+
 async def test_no_avisa_de_sucursales_sin_citas():
     """Que el stand no abra ya lo alerta el sistema de asistencias."""
     alertas_citas._avisadas.clear()
