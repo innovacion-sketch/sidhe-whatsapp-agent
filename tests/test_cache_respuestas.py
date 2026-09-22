@@ -8,6 +8,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from sidhe_agent.services.cache_respuestas import (
     apta_para_guardar,
+    clave,
     es_pregunta_generica,
     fijar_prompt,
     huella_actual,
@@ -103,6 +104,23 @@ def test_el_nombre_se_detecta_sin_acentos():
 
 def test_una_respuesta_vacia_no_se_guarda():
     assert not apta_para_guardar("¿a qué hora abren?", "   ", TURNO_SIN_TOOLS)
+
+
+def test_la_misma_pregunta_escrita_distinto_cae_en_la_misma_clave():
+    """Así el caché sirve aunque no haya proveedor de embeddings."""
+    igual = clave("¿A qué hora abren?")
+    assert clave("a que hora abren") == igual
+    assert clave("A QUE HORA ABREN!!") == igual
+    assert clave("  a  qué   hora abren  ") == igual
+
+
+def test_preguntas_distintas_no_comparten_clave():
+    assert clave("¿a qué hora abren?") != clave("¿a qué hora cierran?")
+    assert clave("cuanto cuesta la deportiva") != clave("cuanto cuesta la clasica")
+
+
+def test_la_clave_no_se_pasa_del_tamano_de_la_columna():
+    assert len(clave("pregunta larguísima " * 40)) <= 200
 
 
 def test_la_huella_cambia_si_cambia_el_prompt():

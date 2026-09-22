@@ -231,10 +231,18 @@ class RespuestaCacheada(Base):
     """
 
     __tablename__ = "respuestas_cacheadas"
-    __table_args__ = (Index("ix_cache_hash", "prompt_hash"),)
+    __table_args__ = (
+        Index("ix_cache_hash", "prompt_hash"),
+        # Para encontrar la pregunta idéntica sin depender de embeddings
+        Index("ix_cache_clave", "prompt_hash", "pregunta_normalizada"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     pregunta: Mapped[str] = mapped_column(Text, nullable=False)
+    # Minúsculas, sin acentos ni signos: "¿A qué hora abren?" -> "a que hora abren"
+    pregunta_normalizada: Mapped[str] = mapped_column(
+        String(200), default="", nullable=False
+    )
     respuesta: Mapped[str] = mapped_column(Text, nullable=False)
     embedding = mapped_column(Vector(EMBEDDING_DIM))
     prompt_hash: Mapped[str] = mapped_column(String(32), nullable=False)

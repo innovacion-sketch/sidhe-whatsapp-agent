@@ -74,6 +74,17 @@ def _normalizar(texto: str) -> str:
     return "".join(c for c in descompuesto if not unicodedata.combining(c))
 
 
+def clave(texto: str) -> str:
+    """La pregunta sin acentos, signos ni dobles espacios.
+
+    Con esto se reconoce la pregunta escrita igual sin llamar a ningún
+    proveedor de embeddings: "¿A qué hora abren?" y "a que hora abren"
+    caen en la misma clave.
+    """
+    letras = [c if c.isalnum() else " " for c in _normalizar(texto)]
+    return " ".join("".join(letras).split())[:200]
+
+
 def es_pregunta_generica(texto: str) -> bool:
     """Si esta pregunta PUEDE contestarse con una respuesta de otro cliente."""
     limpio = (texto or "").strip()
@@ -116,67 +127,114 @@ def apta_para_guardar(
     return True
 
 
+async def _por_similitud(session, pregunta: str, desde, umbral: float):
+    """La entrada más parecida por embeddings, si el proveedor está listo."""
+    try:
+        vector = (await embed_textos([pregunta], "consulta"))[0]
+    except Exception as exc:
+        # Sin proveedor de embeddings el caché sigue sirviendo por texto exacto
+        logger.info("cache_sin_embeddings", detalle=str(exc)[:120])
+        return None
+    distancia = RespuestaCacheada.embedding.cosine_distance(vector)
+    fila = (
+        await session.execute(
+            select(RespuestaCacheada, distancia)
+            .where(
+                RespuestaCacheada.prompt_hash == _huella_prompt,
+                RespuestaCacheada.creado_en >= desde,
+                RespuestaCacheada.embedding.is_not(None),
+            )
+            .order_by(distancia)
+            .limit(1)
+        )
+    ).first()
+    if fila is None:
+        return None
+    guardada, dist = fila
+    similitud = 1 - float(dist)
+    return guardada if similitud >= umbral else None
+
+
 async def buscar(pregunta: str) -> str | None:
-    """La respuesta guardada para una pregunta casi idéntica, o None."""
+    """La respuesta guardada para una pregunta casi idéntica, o None.
+
+    Primero busca la pregunta escrita igual (una comparación de texto, sin
+    costo ni dependencias) y solo después intenta por parecido semántico.
+    """
     ajustes = get_settings()
     if not ajustes.cache_respuestas_activo or not es_pregunta_generica(pregunta):
         return None
     try:
-        vector = (await embed_textos([pregunta], "consulta"))[0]
         desde = datetime.datetime.now(ZoneInfo(ajustes.tz)) - datetime.timedelta(
             days=ajustes.cache_respuestas_dias
         )
-        distancia = RespuestaCacheada.embedding.cosine_distance(vector)
         async with get_session() as session:
-            fila = (
+            guardada = (
                 await session.execute(
-                    select(RespuestaCacheada, distancia)
+                    select(RespuestaCacheada)
                     .where(
                         RespuestaCacheada.prompt_hash == _huella_prompt,
+                        RespuestaCacheada.pregunta_normalizada == clave(pregunta),
                         RespuestaCacheada.creado_en >= desde,
-                        RespuestaCacheada.embedding.is_not(None),
                     )
-                    .order_by(distancia)
                     .limit(1)
                 )
-            ).first()
-            if fila is None:
-                return None
-            guardada, dist = fila
-            similitud = 1 - float(dist)
-            if similitud < ajustes.cache_respuestas_similitud:
+            ).scalars().first()
+            como = "texto_identico"
+            if guardada is None:
+                guardada = await _por_similitud(
+                    session, pregunta, desde, ajustes.cache_respuestas_similitud
+                )
+                como = "parecido"
+            if guardada is None:
                 return None
             guardada.usos += 1
             await session.commit()
-            logger.info(
-                "respuesta_servida_de_cache",
-                similitud=round(similitud, 3),
-                usos=guardada.usos,
-            )
+            logger.info("respuesta_servida_de_cache", como=como, usos=guardada.usos)
             return guardada.respuesta
     except Exception:
-        # Sin embeddings, sin base o con cualquier error: contesta el modelo
+        # Cualquier error: que conteste el modelo
         logger.exception("error_consultando_cache_de_respuestas")
         return None
 
 
 async def guardar(pregunta: str, respuesta: str) -> None:
-    """Guarda una respuesta impersonal. Nunca interrumpe la conversación."""
+    """Guarda una respuesta impersonal. Nunca interrumpe la conversación.
+
+    El embedding es opcional: si no hay proveedor configurado se guarda
+    igual y el caché funciona por texto idéntico.
+    """
     if not get_settings().cache_respuestas_activo or not _huella_prompt:
         return
     try:
-        vector = (await embed_textos([pregunta], "documento"))[0]
+        try:
+            vector = (await embed_textos([pregunta], "documento"))[0]
+        except Exception:
+            vector = None
         async with get_session() as session:
+            ya_estaba = (
+                await session.execute(
+                    select(RespuestaCacheada.id)
+                    .where(
+                        RespuestaCacheada.prompt_hash == _huella_prompt,
+                        RespuestaCacheada.pregunta_normalizada == clave(pregunta),
+                    )
+                    .limit(1)
+                )
+            ).first()
+            if ya_estaba:
+                return
             session.add(
                 RespuestaCacheada(
                     pregunta=pregunta.strip()[:MAX_LARGO],
+                    pregunta_normalizada=clave(pregunta),
                     respuesta=respuesta,
                     embedding=vector,
                     prompt_hash=_huella_prompt,
                 )
             )
             await session.commit()
-        logger.info("respuesta_guardada_en_cache")
+        logger.info("respuesta_guardada_en_cache", con_embedding=vector is not None)
     except Exception:
         logger.exception("error_guardando_en_cache_de_respuestas")
 

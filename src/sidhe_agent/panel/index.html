@@ -395,7 +395,8 @@ function tarjetasDeConsumo(c) {
   ];
   if (c.costo_usd !== null && c.costo_usd !== undefined) {
     tarjetas.push(tarjeta("Gasto del modelo", "$" + c.costo_usd.toFixed(2),
-                          c.llamadas + " llamadas · " + c.dias + " dias"));
+                          c.llamadas + " llamadas · " +
+                          (c.desde ? "desde el " + c.desde : c.dias + " dias")));
   }
   tarjetas.push(tarjeta("Tokens por respuesta", c.salida_por_llamada,
                         detalle || "promedio de salida"));

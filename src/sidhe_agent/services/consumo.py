@@ -193,10 +193,19 @@ async def resumen_periodo(dias: int) -> dict:
                     .order_by(func.sum(UsoModelo.entrada).desc())
                 )
             ).all()
+            # Desde cuándo hay datos: el conteo empezó con un Deploy, así que
+            # decir "30 días" cuando solo hay dos se presta a malentendidos
+            primer_dia = (
+                await session.execute(
+                    select(func.min(UsoModelo.fecha)).where(UsoModelo.fecha >= desde)
+                )
+            ).scalar()
     except Exception:
         logger.exception("error_leyendo_uso_del_modelo")
-        filas = []
-    return desglose(filas, dias)
+        filas, primer_dia = [], None
+    resumen = desglose(filas, dias)
+    resumen["desde"] = primer_dia.isoformat() if primer_dia else None
+    return resumen
 
 
 def desglose(filas: list, dias: int) -> dict:
