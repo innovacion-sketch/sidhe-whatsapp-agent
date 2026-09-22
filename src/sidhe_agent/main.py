@@ -37,6 +37,7 @@ from .memory.long_term import crear_extractor
 from .observability import configurar_logging, enmascarar_user_id
 from .services import (
     agenda,
+    cache_respuestas,
     consumo,
     conversaciones,
     cortesias,
@@ -136,11 +137,15 @@ async def lifespan(app: FastAPI):
         temperature=0.0,
         callbacks=[consumo.CONTADOR],
     )
+    system_prompt = _cargar_system_prompt()
+    # La huella del prompt invalida sola el caché de respuestas cuando cambia
+    # un precio o un horario en las FAQs.
+    cache_respuestas.fijar_prompt(system_prompt)
     app.state.graph = build_graph(
         llm,
         checkpointer=saver,
         store=store,
-        system_prompt=_cargar_system_prompt(),
+        system_prompt=system_prompt,
         extractor=crear_extractor(llm_utilitario),
         resumidor=llm_utilitario,
     )
@@ -333,26 +338,45 @@ async def procesar_mensaje(app: FastAPI, entrante: IncomingMessage) -> None:
                 },
             )
 
-        # Un "gracias" suelto no necesita al modelo. Solo si la conversación
-        # no tiene nada abierto: ver services/cortesias.py.
+        # Dos atajos que no necesitan al modelo, ambos solo cuando la
+        # conversación no tiene nada abierto: un acuse suelto ("gracias") y
+        # una pregunta de catálogo que ya se contestó antes igual.
         if entrante.tipo == "texto" and estado_atencion != conversaciones.REACTIVADO:
-            cortesia = cortesias.respuesta_si_es_acuse(
-                entrante.contenido, snapshot.values or {}, bool(snapshot.next)
+            sin_pendientes = not cortesias.hay_algo_abierto(
+                snapshot.values or {}, bool(snapshot.next)
             )
-            if cortesia:
-                log.info("acuse_contestado_sin_modelo")
+            atajo = tipo_atajo = None
+            if cortesias.es_acuse(entrante.contenido) and sin_pendientes:
+                atajo, tipo_atajo = cortesias.RESPUESTA, "texto"
+            elif sin_pendientes:
+                guardada = await cache_respuestas.buscar(entrante.contenido)
+                atajo, tipo_atajo = guardada, "cache"
+            if atajo:
+                log.info("contestado_sin_modelo", atajo=tipo_atajo)
                 adaptador = _adaptador(app, entrante.canal) or app.state.adapter
                 sid = await adaptador.send(
-                    entrante.user_id, OutgoingMessage(texto=cortesia)
+                    entrante.user_id, OutgoingMessage(texto=atajo)
                 )
                 await _guardar_mensaje(
                     "out",
                     entrante.canal,
                     entrante.user_id,
-                    "texto",
-                    cortesia,
+                    tipo_atajo,
+                    atajo,
                     twilio_sid=sid,
                 )
+                if tipo_atajo == "cache":
+                    # Que el hilo no pierda el paso: la próxima vez el modelo
+                    # tiene que ver lo que ya se preguntó y se contestó.
+                    await app.state.graph.aupdate_state(
+                        config,
+                        {
+                            "messages": [
+                                HumanMessage(content=entrante.contenido),
+                                AIMessage(content=atajo),
+                            ]
+                        },
+                    )
                 return
 
         transcripcion = None
@@ -396,6 +420,19 @@ async def procesar_mensaje(app: FastAPI, entrante: IncomingMessage) -> None:
             twilio_sid=sid,
         )
         log.info("respuesta_enviada", twilio_sid=sid)
+
+        # Si fue una pregunta de catálogo contestada sin consultar nada, se
+        # guarda para el próximo que pregunte lo mismo. Va al final: guardar
+        # nunca debe retrasar la respuesta al cliente.
+        if entrante.tipo == "texto" and cache_respuestas.apta_para_guardar(
+            entrante.contenido,
+            texto,
+            resultado.get("messages", []),
+            hay_ui=ui is not None,
+            escalado=bool(resultado.get("escalado")),
+            nombre_cliente=(resultado.get("perfil") or {}).get("nombre", ""),
+        ):
+            await cache_respuestas.guardar(entrante.contenido, texto)
     except GraphRecursionError:
         # El agente se atoro en un bucle de tools: no dejar al cliente sin salida.
         log.exception("limite_de_pasos_agotado")

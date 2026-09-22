@@ -53,6 +53,15 @@ class Settings(BaseSettings):
     # grande se lleva casi un tercio del gasto sin mejorar la respuesta.
     anthropic_model_utilitario: str = "claude-haiku-4-5"
 
+    # Caché de respuestas de catálogo (ver services/cache_respuestas.py).
+    # Apagarlo es poner CACHE_RESPUESTAS_ACTIVO=false y desplegar.
+    cache_respuestas_activo: bool = True
+    # Qué tan parecida tiene que ser la pregunta para reusar la respuesta.
+    # Alto a propósito: 0.97 es "la misma pregunta escrita distinto".
+    cache_respuestas_similitud: float = 0.97
+    # Una respuesta guardada caduca sola, por si cambió algo fuera del prompt
+    cache_respuestas_dias: int = 30
+
     # Twilio
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""

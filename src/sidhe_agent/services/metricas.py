@@ -38,6 +38,7 @@ async def _resumen(session, desde) -> dict:
                 func.count(Mensaje.id).filter(Mensaje.direccion == "out"),
                 func.count(Mensaje.id).filter(Mensaje.tipo == "audio"),
                 func.count(Mensaje.id).filter(Mensaje.tipo == "seleccion_interactiva"),
+                func.count(Mensaje.id).filter(Mensaje.tipo == "cache"),
             ).where(Mensaje.creado_en >= desde)
         )
     ).one()
@@ -48,6 +49,8 @@ async def _resumen(session, desde) -> dict:
         "salientes": fila[3],
         "notas_de_voz": fila[4],
         "toques_de_boton": fila[5],
+        # Preguntas repetidas contestadas sin llamar al modelo
+        "respuestas_de_cache": fila[6],
     }
 
 

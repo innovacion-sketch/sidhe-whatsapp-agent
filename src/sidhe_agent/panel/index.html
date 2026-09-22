@@ -414,6 +414,8 @@ function pintarMetricas(d) {
     tarjeta("1a respuesta", duracion(d.primera_respuesta_seg), "promedio"),
     tarjeta("Notas de voz", d.resumen.notas_de_voz, "transcritas"),
     tarjeta("Toques de boton", d.resumen.toques_de_boton, "selecciones"),
+    tarjeta("Respuestas de cache", d.resumen.respuestas_de_cache || 0,
+            "preguntas repetidas, sin costo"),
   ].concat(tarjetasDeConsumo(d.consumo)).join("");
 
   dibujarSerie(d.serie_diaria);

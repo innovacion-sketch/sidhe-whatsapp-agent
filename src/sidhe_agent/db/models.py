@@ -217,6 +217,33 @@ class RespuestaRapida(Base):
     )
 
 
+class RespuestaCacheada(Base):
+    """Preguntas de catálogo ya contestadas, para no volver a pagarlas.
+
+    Solo entran respuestas que el bot dio SIN consultar ninguna herramienta
+    ni datos del cliente: esas valen para cualquiera. Nunca entra nada que
+    dependa de quién pregunta (su pedido, su cita, su perfil).
+
+    `prompt_hash` es la huella del system prompt con el que se generó: si
+    cambia un precio o un horario en las FAQs, la huella cambia y las
+    respuestas viejas dejan de servirse solas, sin tener que acordarse de
+    limpiar nada.
+    """
+
+    __tablename__ = "respuestas_cacheadas"
+    __table_args__ = (Index("ix_cache_hash", "prompt_hash"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    pregunta: Mapped[str] = mapped_column(Text, nullable=False)
+    respuesta: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding = mapped_column(Vector(EMBEDDING_DIM))
+    prompt_hash: Mapped[str] = mapped_column(String(32), nullable=False)
+    usos: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    creado_en: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class UsoModelo(Base):
     """Tokens gastados por día y por modelo: la factura, medida en casa.
 
