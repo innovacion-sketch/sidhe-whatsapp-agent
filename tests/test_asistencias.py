@@ -64,6 +64,17 @@ async def test_si_la_consulta_falla_tampoco_bloquea():
         assert await asistencias.dias_sin_personal(HOY, MANANA) == set()
 
 
+async def test_la_hora_viaja_como_hora_no_como_texto():
+    """asyncpg rechaza '15:29:53' para un ::time; quiere un time de verdad."""
+    espia = AsyncMock(return_value=[])
+    with patch.object(asistencias, "_consultar", espia):
+        await asistencias.sucursales_sin_checada(HOY, datetime.time(15, 29, 53))
+
+    parametros = espia.await_args.args[1]
+    assert isinstance(parametros["hora"], datetime.time)
+    assert isinstance(parametros["hoy"], datetime.date)
+
+
 async def test_si_la_consulta_falla_no_se_inventa_una_alerta():
     """None = no sé. Distinto de un conjunto vacío, que sí es 'todo cubierto'."""
     with (

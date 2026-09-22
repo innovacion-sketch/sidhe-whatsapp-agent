@@ -25,7 +25,7 @@ import datetime
 from typing import Any
 
 import structlog
-from sqlalchemy import text
+from sqlalchemy import Date, Time, bindparam, text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from ..config import get_settings
@@ -35,8 +35,7 @@ logger = structlog.get_logger(__name__)
 _engine: AsyncEngine | None = None
 
 # Días con rol cargado en los que NADIE trabaja en esa sucursal
-SQL_DIAS_SIN_PERSONAL = text(
-    """
+SQL_DIAS_SIN_PERSONAL_TEXTO = """
     SELECT s.nombre, hp.fecha
       FROM horarios_programados hp
       JOIN empleados e ON e.id = hp.empleado_id
@@ -51,6 +50,8 @@ SQL_DIAS_SIN_PERSONAL = text(
                AND hp.hora_salida IS NOT NULL
            ) = 0
     """
+SQL_DIAS_SIN_PERSONAL = text(SQL_DIAS_SIN_PERSONAL_TEXTO).bindparams(
+    bindparam("desde", type_=Date()), bindparam("hasta", type_=Date())
 )
 
 # Sucursales donde hoy había gente programada y nadie ha marcado entrada
@@ -80,6 +81,11 @@ SQL_SIN_CHECADA = text(
      GROUP BY s.nombre
     HAVING COUNT(j.id) = 0
     """
+).bindparams(
+    # Tipos explícitos: el driver necesita un date y un time de verdad, no
+    # texto, y con text() no los adivina.
+    bindparam("hoy", type_=Date()),
+    bindparam("hora", type_=Time()),
 )
 
 
@@ -143,9 +149,7 @@ async def sucursales_sin_checada(
     None = no se pudo consultar (y entonces no se alerta nada, para no
     inventar una emergencia por una falla de conexión).
     """
-    filas = await _consultar(
-        SQL_SIN_CHECADA, {"hoy": hoy, "hora": hora.strftime("%H:%M:%S")}
-    )
+    filas = await _consultar(SQL_SIN_CHECADA, {"hoy": hoy, "hora": hora})
     if filas is None:
         return None
     return {nombre for (nombre,) in filas}
