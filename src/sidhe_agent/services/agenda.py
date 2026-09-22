@@ -20,6 +20,7 @@ from sqlalchemy import select
 from ..config import get_settings
 from ..db.models import Slot, Sucursal
 from ..db.session import get_session
+from . import asistencias
 
 logger = structlog.get_logger(__name__)
 
@@ -83,6 +84,10 @@ async def asegurar_slots(dias: int, minutos: int = 60) -> int:
     """
     hoy = datetime.datetime.now(ZoneInfo(get_settings().tz)).date()
     fechas = [hoy + datetime.timedelta(days=n) for n in range(0, dias + 1)]
+    # Días que el rol de personal da por cerrados. Vacío si no hay sistema de
+    # asistencias configurado o si no se pudo consultar: entonces se agenda
+    # como siempre, que es mejor que quedarse sin citas por falta de datos.
+    sin_personal = await asistencias.dias_sin_personal(hoy, fechas[-1])
 
     creados = 0
     async with get_session() as session:
@@ -107,7 +112,7 @@ async def asegurar_slots(dias: int, minutos: int = 60) -> int:
                 apertura=sucursal.horario_apertura,
                 cierre=sucursal.horario_cierre,
                 dias_operacion=sucursal.dias_operacion,
-                fechas=fechas,
+                fechas=[f for f in fechas if (sucursal.nombre, f) not in sin_personal],
                 existentes=existentes,
                 minutos=minutos,
             )

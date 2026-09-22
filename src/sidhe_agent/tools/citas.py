@@ -22,6 +22,7 @@ from sqlalchemy.exc import IntegrityError
 from ..config import get_settings
 from ..db.models import Cita, Slot, Sucursal
 from ..db.session import get_session
+from ..services import asistencias
 from ..services.google_calendar import borrar_evento, crear_evento
 from ..services.n8n import avisar_cita
 
@@ -172,6 +173,21 @@ async def _agendar_cita(
             if slot.reservados >= slot.capacidad:
                 return {
                     "error": "slot_no_disponible",
+                    "alternativas": await _alternativas(session, slot),
+                }
+            # Última comprobación contra el rol de personal: el horario pudo
+            # haberse generado antes de que se cargara el rol de esa semana.
+            sucursal_del_slot = await session.get(Sucursal, slot.sucursal_id)
+            if sucursal_del_slot is not None and (
+                sucursal_del_slot.nombre,
+                slot.fecha,
+            ) in await asistencias.dias_sin_personal(slot.fecha, slot.fecha):
+                return {
+                    "error": "sin_personal_ese_dia",
+                    "que_decir": (
+                        "ese día no habrá personal en esa sucursal; "
+                        "discúlpate y ofrécele otra fecha"
+                    ),
                     "alternativas": await _alternativas(session, slot),
                 }
             slot.reservados += 1

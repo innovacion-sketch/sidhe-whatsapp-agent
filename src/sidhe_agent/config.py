@@ -44,6 +44,21 @@ class Settings(BaseSettings):
 
     # Base de datos (un solo DSN; cada driver ajusta su dialecto)
     database_url: str = "postgresql://postgres:postgres@localhost:5432/sidhe"
+    # Base del sistema de asistencias, SOLO LECTURA. Vacío = el bot agenda
+    # sin consultar el rol de personal (comportamiento de siempre).
+    # Ej: postgresql+asyncpg://usuario:clave@one_postgres:5432/asistencias
+    asistencias_database_url: str = ""
+
+    # Alertas por correo (mismas variables que usa el sistema de asistencias,
+    # para no dar de alta otra cuenta: GMAIL_USER, GMAIL_APP_PASSWORD,
+    # EMAIL_ALERTAS_TO, EMAIL_ALERTAS_CC)
+    gmail_user: str = ""
+    gmail_app_password: str = ""
+    email_alertas_to: str = ""
+    email_alertas_cc: str = ""
+    # A qué hora se revisa si las citas de hoy tienen quién las atienda
+    alerta_citas_desde: int = 11
+    alerta_citas_hasta: int = 19
 
     # Anthropic
     anthropic_api_key: str = ""

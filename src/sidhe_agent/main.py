@@ -37,6 +37,8 @@ from .memory.long_term import crear_extractor
 from .observability import configurar_logging, enmascarar_user_id
 from .services import (
     agenda,
+    alertas_citas,
+    asistencias,
     cache_respuestas,
     consumo,
     conversaciones,
@@ -174,6 +176,9 @@ async def lifespan(app: FastAPI):
     )
     # Igual con la agenda: los horarios son filas generadas por adelantado y
     # sin relleno se acaban solos (el bot llego a ofrecer solo dos dias).
+    # Citas de hoy en una sucursal donde nadie abrio: correo a los mismos
+    # destinatarios que ya usa el sistema de asistencias.
+    app.state.vigilancia_citas = asyncio.create_task(alertas_citas.vigilar())
     app.state.agenda = asyncio.create_task(
         agenda.mantener_agenda_abierta(
             settings.agenda_dias_adelante, settings.agenda_minutos_por_cita
@@ -183,11 +188,16 @@ async def lifespan(app: FastAPI):
     logger.info("app_iniciada", modelo=settings.anthropic_model)
     yield
 
-    for tarea in (app.state.sincronizador, app.state.agenda):
+    for tarea in (
+        app.state.sincronizador,
+        app.state.agenda,
+        app.state.vigilancia_citas,
+    ):
         tarea.cancel()
         with suppress(asyncio.CancelledError):
             await tarea
     await app.state.stack.aclose()
+    await asistencias.cerrar_motor()
     await dispose_engine()
 
 
