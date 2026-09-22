@@ -167,26 +167,35 @@ CONTADOR = ContadorDeTokens()
 
 
 async def resumen_periodo(dias: int) -> dict:
-    """Gasto de los últimos `dias`, por modelo y en total."""
+    """Gasto de los últimos `dias`, por modelo y en total.
+
+    Nunca tumba el panel: si la tabla todavía no existe (falta correr la
+    migración) o la consulta falla, devuelve el resumen en ceros. El resto
+    de las métricas vale más que este dato.
+    """
     desde = datetime.datetime.now(ZoneInfo(get_settings().tz)).date() - (
         datetime.timedelta(days=max(1, dias) - 1)
     )
-    async with get_session() as session:
-        filas = (
-            await session.execute(
-                select(
-                    UsoModelo.modelo,
-                    func.sum(UsoModelo.llamadas),
-                    func.sum(UsoModelo.entrada),
-                    func.sum(UsoModelo.salida),
-                    func.sum(UsoModelo.cache_lectura),
-                    func.sum(UsoModelo.cache_escritura),
+    try:
+        async with get_session() as session:
+            filas = (
+                await session.execute(
+                    select(
+                        UsoModelo.modelo,
+                        func.sum(UsoModelo.llamadas),
+                        func.sum(UsoModelo.entrada),
+                        func.sum(UsoModelo.salida),
+                        func.sum(UsoModelo.cache_lectura),
+                        func.sum(UsoModelo.cache_escritura),
+                    )
+                    .where(UsoModelo.fecha >= desde)
+                    .group_by(UsoModelo.modelo)
+                    .order_by(func.sum(UsoModelo.entrada).desc())
                 )
-                .where(UsoModelo.fecha >= desde)
-                .group_by(UsoModelo.modelo)
-                .order_by(func.sum(UsoModelo.entrada).desc())
-            )
-        ).all()
+            ).all()
+    except Exception:
+        logger.exception("error_leyendo_uso_del_modelo")
+        filas = []
     return desglose(filas, dias)
 
 

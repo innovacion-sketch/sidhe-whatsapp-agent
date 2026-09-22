@@ -116,6 +116,21 @@ def test_lee_el_uso_de_una_respuesta_de_langchain():
     }
 
 
+async def test_si_falta_la_tabla_el_panel_no_se_cae():
+    """Antes de correr la migración, las métricas deben seguir abriendo."""
+    from unittest.mock import patch
+
+    from sidhe_agent.services import consumo
+
+    with patch.object(
+        consumo, "get_session", side_effect=RuntimeError('relation "uso_modelo" no existe')
+    ):
+        resumen = await consumo.resumen_periodo(30)
+
+    assert resumen["llamadas"] == 0
+    assert resumen["costo_usd"] is None
+
+
 def test_una_respuesta_sin_uso_no_se_cuenta():
     from langchain_core.messages import AIMessage
 
