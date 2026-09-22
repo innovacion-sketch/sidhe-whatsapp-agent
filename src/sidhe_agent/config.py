@@ -2,7 +2,7 @@
 
 import base64
 from functools import lru_cache
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote_plus, urlencode, urlsplit, urlunsplit
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -46,8 +46,15 @@ class Settings(BaseSettings):
     database_url: str = "postgresql://postgres:postgres@localhost:5432/sidhe"
     # Base del sistema de asistencias, SOLO LECTURA. Vacío = el bot agenda
     # sin consultar el rol de personal (comportamiento de siempre).
-    # Ej: postgresql+asyncpg://usuario:clave@one_postgres:5432/asistencias
+    # Dos formas: el DSN completo, o los datos por separado —que es lo
+    # recomendado, porque una contraseña con @ o # rompe el DSN si no se
+    # codifica, y ese error solo se ve como "password authentication failed".
     asistencias_database_url: str = ""
+    asistencias_db_host: str = ""
+    asistencias_db_port: int = 5432
+    asistencias_db_user: str = ""
+    asistencias_db_password: str = ""
+    asistencias_db_name: str = "asistencias"
 
     # Alertas por correo (mismas variables que usa el sistema de asistencias,
     # para no dar de alta otra cuenta: GMAIL_USER, GMAIL_APP_PASSWORD,
@@ -168,6 +175,27 @@ class Settings(BaseSettings):
             return base64.b64decode(valor, validate=True).decode("utf-8")
         except Exception:
             return valor
+
+    @property
+    def asistencias_url(self) -> str:
+        """DSN del sistema de asistencias, o "" si no está configurado.
+
+        Arma la URL a partir de los datos sueltos codificando usuario y
+        contraseña, así se pueden copiar tal cual vienen del otro servicio.
+        """
+        if self.asistencias_database_url:
+            return _normalizar_esquema(
+                self.asistencias_database_url, "postgresql+asyncpg://"
+            )
+        if not (self.asistencias_db_host and self.asistencias_db_user):
+            return ""
+        usuario = quote_plus(self.asistencias_db_user)
+        clave = quote_plus(self.asistencias_db_password)
+        return (
+            f"postgresql+asyncpg://{usuario}:{clave}"
+            f"@{self.asistencias_db_host}:{self.asistencias_db_port}"
+            f"/{self.asistencias_db_name}"
+        )
 
     @property
     def sqlalchemy_url(self) -> str:

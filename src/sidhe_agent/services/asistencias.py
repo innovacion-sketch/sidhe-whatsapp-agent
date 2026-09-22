@@ -84,14 +84,14 @@ SQL_SIN_CHECADA = text(
 
 
 def configurado() -> bool:
-    return bool(get_settings().asistencias_database_url)
+    return bool(get_settings().asistencias_url)
 
 
 def _motor() -> AsyncEngine:
     global _engine
     if _engine is None:
         _engine = create_async_engine(
-            get_settings().asistencias_database_url,
+            get_settings().asistencias_url,
             pool_pre_ping=True,
             pool_size=2,
             max_overflow=0,

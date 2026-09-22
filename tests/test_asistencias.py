@@ -15,6 +15,41 @@ HOY = datetime.date(2026, 9, 22)
 MANANA = datetime.date(2026, 9, 23)
 
 
+def test_la_clave_con_caracteres_raros_no_rompe_la_conexion():
+    """Una contraseña con @ o # solo se ve como 'password authentication failed'."""
+    from sidhe_agent.config import Settings
+
+    ajustes = Settings(
+        asistencias_db_host="one_postgres",
+        asistencias_db_user="asistencias_user",
+        asistencias_db_password="Cl@ve#con/raros:1",
+        asistencias_db_name="asistencias",
+    )
+    url = ajustes.asistencias_url
+
+    assert url.startswith("postgresql+asyncpg://asistencias_user:")
+    assert "@one_postgres:5432/asistencias" in url
+    # El @ de la contraseña va codificado; el único @ literal separa el host
+    assert url.count("@") == 1
+    assert "Cl%40ve%23con%2Fraros%3A1" in url
+
+
+def test_sin_datos_no_hay_url_de_asistencias():
+    from sidhe_agent.config import Settings
+
+    assert Settings().asistencias_url == ""
+
+
+def test_el_dsn_completo_gana_si_se_da():
+    from sidhe_agent.config import Settings
+
+    ajustes = Settings(
+        asistencias_database_url="postgres://u:p@host:5432/asistencias",
+        asistencias_db_host="otro",
+    )
+    assert "postgresql+asyncpg://u:p@host:5432/asistencias" == ajustes.asistencias_url
+
+
 async def test_sin_sistema_configurado_no_bloquea_nada():
     with patch.object(asistencias, "configurado", return_value=False):
         assert await asistencias.dias_sin_personal(HOY, MANANA) == set()
