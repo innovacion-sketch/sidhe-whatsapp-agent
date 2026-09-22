@@ -50,6 +50,30 @@ def test_lo_que_habla_de_lo_propio_nunca_se_reusa():
         assert not es_pregunta_generica(pregunta), pregunta
 
 
+def test_lo_que_no_parece_pregunta_no_se_guarda():
+    """Casos reales que se colaron al caché en producción."""
+    for texto in [
+        "Okey gracias",  # un acuse, no una pregunta
+        "Si sobre los precios",  # respuesta a algo que preguntó el bot
+        "si por favor",
+        "el jueves esta bien",
+        "muchas gracias entonces",
+    ]:
+        assert not es_pregunta_generica(texto), texto
+
+
+def test_una_pregunta_sin_signos_si_se_reconoce():
+    """En WhatsApp casi nadie escribe los signos de interrogación."""
+    for texto in [
+        "Un estudio de pisada cuanto sale",
+        "cuanto cuestan las plantillas",
+        "a que hora abren los domingos",
+        "hacen envios a provincia",
+        "tienen sucursal en monterrey",
+    ]:
+        assert es_pregunta_generica(texto), texto
+
+
 def test_mensajes_muy_cortos_o_muy_largos_no_entran():
     assert not es_pregunta_generica("hola")
     assert not es_pregunta_generica("precio")

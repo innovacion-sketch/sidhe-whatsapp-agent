@@ -36,6 +36,7 @@ from sqlalchemy import select
 from ..config import get_settings
 from ..db.models import RespuestaCacheada
 from ..db.session import get_session
+from . import cortesias
 from .embeddings import embed_textos
 
 logger = structlog.get_logger(__name__)
@@ -53,6 +54,16 @@ PERSONAL = re.compile(
 # Tampoco lo que claramente pide un trámite propio
 TRAMITE = re.compile(
     r"\b(cancel|reagend|reprogram|agend|modific|factur)\w*\b", re.IGNORECASE
+)
+# Tiene que parecer una pregunta de verdad. "Si sobre los precios" es la
+# respuesta a algo que preguntó el bot: fuera de esa conversación no
+# significa nada, y reusar su respuesta con otro cliente es una apuesta.
+INTERROGATIVAS = re.compile(
+    r"\b(que|cual|cuales|cuanto|cuanta|cuantos|cuantas|cuando|donde|como|quien|"
+    r"porque|hacen|tienen|puedo|puedes|pueden|aceptan|manejan|venden|cuesta|"
+    r"cuestan|vale|valen|sale|salen|hay|sirve|sirven|incluye|incluyen|dura|"
+    r"duran|tarda|tardan|necesito|requiere|requieren|atienden|abren|cierran)\b",
+    re.IGNORECASE,
 )
 
 _huella_prompt = ""
@@ -90,8 +101,13 @@ def es_pregunta_generica(texto: str) -> bool:
     limpio = (texto or "").strip()
     if not (MIN_LARGO <= len(limpio) <= MAX_LARGO):
         return False
+    if cortesias.es_acuse(limpio):
+        return False
     normalizado = _normalizar(limpio)
-    return not PERSONAL.search(normalizado) and not TRAMITE.search(normalizado)
+    if PERSONAL.search(normalizado) or TRAMITE.search(normalizado):
+        return False
+    lleva_signo = "?" in limpio or "¿" in limpio
+    return lleva_signo or bool(INTERROGATIVAS.search(normalizado))
 
 
 def _hubo_herramientas(mensajes: list) -> bool:
