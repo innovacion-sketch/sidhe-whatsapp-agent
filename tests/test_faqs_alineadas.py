@@ -75,7 +75,12 @@ def test_el_horario_es_11_a_9_todos_los_dias_en_todos_lados():
     with io.open(RAIZ / "data" / "sucursales.csv", encoding="utf-8") as f:
         for fila in csv.DictReader(f):
             assert (fila["horario_apertura"], fila["horario_cierre"]) == ("11:00", "21:00"), fila["nombre"]
-            assert len(fila["dias_operacion"].split("|")) == 7, fila["nombre"]
+            # Una sucursal puede tener descansos fijos (hoy Tijuana y
+            # Monterrey). El horario de la FAQ sigue valiendo; lo que no
+            # puede pasar es que el bot no lo sepa, y por eso buscar_sucursal
+            # avisa cuales son (tools/sucursales.py::dias_de_descanso).
+            dias = fila["dias_operacion"].split("|")
+            assert 5 <= len(dias) <= 7, fila["nombre"]
 
 
 def test_el_tiempo_de_entrega_es_el_mismo():

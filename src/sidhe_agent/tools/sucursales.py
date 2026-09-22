@@ -19,8 +19,28 @@ def _horario(apertura: datetime.time, cierre: datetime.time) -> str:
     return f"{apertura.strftime('%H:%M')} a {cierre.strftime('%H:%M')}"
 
 
+DIAS_SEMANA = ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo"]
+CON_ACENTO = {"miercoles": "miércoles", "sabado": "sábado"}
+
+
+def dias_de_descanso(dias_operacion: list | None) -> str:
+    """Los días que esa sucursal NO abre, en texto. "" si abre todos.
+
+    Sin esto el bot mandaría a alguien un lunes a una sucursal que descansa
+    los lunes: la FAQ general dice "de lunes a domingo" y es cierta para
+    casi todas, pero no para todas.
+    """
+    abiertos = set(dias_operacion or DIAS_SEMANA)
+    cerrados = [CON_ACENTO.get(d, d) for d in DIAS_SEMANA if d not in abiertos]
+    if not cerrados:
+        return ""
+    if len(cerrados) == 1:
+        return cerrados[0]
+    return ", ".join(cerrados[:-1]) + " y " + cerrados[-1]
+
+
 def _a_dict(sucursal: Sucursal) -> dict:
-    return {
+    datos = {
         "id": sucursal.id,
         "nombre": sucursal.nombre,
         "ciudad": sucursal.ciudad,
@@ -29,6 +49,12 @@ def _a_dict(sucursal: Sucursal) -> dict:
         "horario": _horario(sucursal.horario_apertura, sucursal.horario_cierre),
         "telefono": sucursal.telefono,
     }
+    descansa = dias_de_descanso(sucursal.dias_operacion)
+    if descansa:
+        # Solo aparece cuando aplica, para no ensuciar el resto de los casos
+        datos["descansa"] = descansa
+        datos["que_decir"] = f"esta sucursal no abre {descansa}; avísale al cliente"
+    return datos
 
 
 async def _buscar_sucursal(texto_ubicacion: str) -> list[dict]:

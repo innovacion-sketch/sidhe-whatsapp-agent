@@ -77,6 +77,27 @@ def slots_faltantes(
     return nuevos
 
 
+def dias_a_retirar(
+    nombre: str,
+    fechas: list[datetime.date],
+    sin_personal: set[tuple[str, datetime.date]],
+    dias_operacion: list | None,
+) -> list[datetime.date]:
+    """Fechas que ya no deberían ofrecerse en esa sucursal.
+
+    Son las que el rol de personal cerró y las de descanso fijo. Ojo con la
+    lista vacía: igual que al generar, significa "abre todos los días", no
+    "no abre ninguno" — lo contrario borraría la agenda entera.
+    """
+    abiertos = set(dias_operacion or DIAS_SEMANA)
+    return [
+        fecha
+        for fecha in fechas
+        if (nombre, fecha) in sin_personal
+        or DIAS_SEMANA[fecha.weekday()] not in abiertos
+    ]
+
+
 async def asegurar_slots(dias: int, minutos: int = 60) -> int:
     """Rellena hasta `dias` hacia adelante para todas las sucursales activas.
 
@@ -119,11 +140,14 @@ async def asegurar_slots(dias: int, minutos: int = 60) -> int:
             session.add_all(Slot(**n) for n in nuevos)
             creados += len(nuevos)
 
-            # Los días que el rol cerró pueden tener horarios generados antes
-            # de que se cargara ese rol. Se quitan los que nadie reservó; los
-            # que ya tienen cita NO se tocan: esa cita hay que atenderla o
-            # reubicarla a mano, y para eso está la alerta por correo.
-            cerrados = [f for f in fechas if (sucursal.nombre, f) in sin_personal]
+            # Días que ya no deberían ofrecerse: los que el rol cerró y los
+            # de descanso fijo de la sucursal. Pueden tener horarios creados
+            # antes del cambio. Se quitan los que nadie reservó; los que ya
+            # tienen cita NO se tocan: esa cita hay que atenderla o reubicarla
+            # a mano, y para eso está la alerta por correo.
+            cerrados = dias_a_retirar(
+                sucursal.nombre, fechas, sin_personal, sucursal.dias_operacion
+            )
             if cerrados:
                 borrados += (
                     await session.execute(
