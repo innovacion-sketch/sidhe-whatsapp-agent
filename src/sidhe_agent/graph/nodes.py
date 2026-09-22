@@ -23,7 +23,6 @@ from ..graph.state import AgentState
 from ..memory.long_term import PROMPT_EXTRACCION, guardar_perfil, leer_perfil
 from ..memory.summarizer import _transcript
 from ..observability import enmascarar_user_id
-from ..services.consumo import CONSUMO
 
 logger = structlog.get_logger(__name__)
 
@@ -130,39 +129,15 @@ def _log_resultados_de_tools(mensajes: list) -> None:
         )
 
 
-def _log_uso(respuesta: Any) -> None:
-    """Tokens de cada llamada al modelo, para saber en qué se va el gasto.
-
-    `cache_lectura` en cero llamada tras llamada significa que el caché del
-    system prompt no está pegando y se está pagando completo cada vez.
-    """
-    uso = getattr(respuesta, "usage_metadata", None)
-    if not uso:
-        return
-    detalle = uso.get("input_token_details") or {}
-    CONSUMO.registrar(
-        entrada=uso.get("input_tokens") or 0,
-        salida=uso.get("output_tokens") or 0,
-        cache_lectura=detalle.get("cache_read") or 0,
-        cache_escritura=detalle.get("cache_creation") or 0,
-    )
-    logger.info(
-        "uso_tokens",
-        entrada=uso.get("input_tokens"),
-        salida=uso.get("output_tokens"),
-        cache_lectura=detalle.get("cache_read"),
-        cache_escritura=detalle.get("cache_creation"),
-    )
-
-
 def make_agente(
     llm_con_tools: Runnable, system_prompt: str
 ) -> Callable[[AgentState], Awaitable[dict[str, Any]]]:
     async def agente(state: AgentState) -> dict[str, Any]:
         _log_resultados_de_tools(state["messages"])
         system = SystemMessage(content=_bloques_system(system_prompt, state))
+        # El gasto se mide con un callback en el modelo (services/consumo.py),
+        # no aquí: así también entran el extractor de perfil y el resumidor.
         respuesta = await llm_con_tools.ainvoke([system, *state["messages"]])
-        _log_uso(respuesta)
         for llamada in getattr(respuesta, "tool_calls", []) or []:
             logger.info(
                 "tool_solicitada",

@@ -1,14 +1,33 @@
-"""Cuánto lleva gastado el bot en llamadas al modelo desde que arrancó.
+"""Cuánto gasta el bot en llamadas al modelo, medido en casa.
 
-No se guarda en base de datos: se reinicia en cada Deploy, y con eso alcanza
-para las dos preguntas que de verdad importan cuando la factura sube:
-¿está pegando el caché del prompt? y ¿cuánto cuesta atender un mensaje?
+Se cuenta con un callback de LangChain enganchado a los modelos, no en un
+punto del grafo: así entran TODAS las llamadas — la del agente, la que
+extrae el perfil y la que resume conversaciones largas. Contar solo una de
+las tres era la razón de que el panel mostrara mucho menos que la factura.
+
+El acumulado se guarda por día y por modelo en la tabla `uso_modelo`,
+porque en memoria se reinicia con cada Deploy y deja de ser comparable con
+el recibo de Anthropic.
 
 Ojo con las cuentas: LangChain reporta `input_tokens` ya con los tokens
 cacheados sumados, así que lo que se paga a precio completo es la resta.
 """
 
+import datetime
 from dataclasses import dataclass
+from typing import Any
+from zoneinfo import ZoneInfo
+
+import structlog
+from langchain_core.callbacks import AsyncCallbackHandler
+from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as insertar_pg
+
+from ..config import get_settings
+from ..db.models import UsoModelo
+from ..db.session import get_session
+
+logger = structlog.get_logger(__name__)
 
 # USD por millón de tokens (entrada, salida), precios públicos de Anthropic.
 # Un modelo que no esté en la tabla no rompe nada: solo no estima el costo.
@@ -87,5 +106,127 @@ class Consumo:
         }
 
 
-# Acumulado del proceso. Un solo event loop, no hace falta candado.
-CONSUMO = Consumo()
+def uso_de_respuesta(mensaje: Any) -> tuple[str, dict] | None:
+    """(modelo, tokens) de una respuesta de LangChain, o None si no trae uso."""
+    uso = getattr(mensaje, "usage_metadata", None)
+    if not uso:
+        return None
+    meta = getattr(mensaje, "response_metadata", None) or {}
+    modelo = meta.get("model") or meta.get("model_name") or "desconocido"
+    detalle = uso.get("input_token_details") or {}
+    return modelo, {
+        "entrada": uso.get("input_tokens") or 0,
+        "salida": uso.get("output_tokens") or 0,
+        "cache_lectura": detalle.get("cache_read") or 0,
+        "cache_escritura": detalle.get("cache_creation") or 0,
+    }
+
+
+async def registrar_uso(modelo: str, tokens: dict) -> None:
+    """Suma una llamada al acumulado del día para ese modelo."""
+    hoy = datetime.datetime.now(ZoneInfo(get_settings().tz)).date()
+    insercion = insertar_pg(UsoModelo).values(
+        fecha=hoy, modelo=modelo[:60], llamadas=1, **tokens
+    )
+    async with get_session() as session:
+        await session.execute(
+            insercion.on_conflict_do_update(
+                constraint="uq_uso_fecha_modelo",
+                set_={
+                    "llamadas": UsoModelo.llamadas + 1,
+                    "entrada": UsoModelo.entrada + tokens["entrada"],
+                    "salida": UsoModelo.salida + tokens["salida"],
+                    "cache_lectura": UsoModelo.cache_lectura + tokens["cache_lectura"],
+                    "cache_escritura": (
+                        UsoModelo.cache_escritura + tokens["cache_escritura"]
+                    ),
+                },
+            )
+        )
+        await session.commit()
+
+
+class ContadorDeTokens(AsyncCallbackHandler):
+    """Anota cada llamada al modelo. Nunca interrumpe la conversación."""
+
+    async def on_llm_end(self, response: Any, **kwargs: Any) -> None:
+        try:
+            for generaciones in response.generations:
+                for generacion in generaciones:
+                    datos = uso_de_respuesta(getattr(generacion, "message", None))
+                    if not datos:
+                        continue
+                    modelo, tokens = datos
+                    logger.info("uso_tokens", modelo=modelo, **tokens)
+                    await registrar_uso(modelo, tokens)
+        except Exception:
+            logger.exception("error_registrando_uso_de_tokens")
+
+
+CONTADOR = ContadorDeTokens()
+
+
+async def resumen_periodo(dias: int) -> dict:
+    """Gasto de los últimos `dias`, por modelo y en total."""
+    desde = datetime.datetime.now(ZoneInfo(get_settings().tz)).date() - (
+        datetime.timedelta(days=max(1, dias) - 1)
+    )
+    async with get_session() as session:
+        filas = (
+            await session.execute(
+                select(
+                    UsoModelo.modelo,
+                    func.sum(UsoModelo.llamadas),
+                    func.sum(UsoModelo.entrada),
+                    func.sum(UsoModelo.salida),
+                    func.sum(UsoModelo.cache_lectura),
+                    func.sum(UsoModelo.cache_escritura),
+                )
+                .where(UsoModelo.fecha >= desde)
+                .group_by(UsoModelo.modelo)
+                .order_by(func.sum(UsoModelo.entrada).desc())
+            )
+        ).all()
+    return desglose(filas, dias)
+
+
+def desglose(filas: list, dias: int) -> dict:
+    """Arma el resumen a partir de las filas agregadas de `uso_modelo`."""
+    total = Consumo()
+    por_modelo = []
+    costo_total = 0.0
+    se_pudo_costear = bool(filas)
+    for modelo, llamadas, entrada, salida, lectura, escritura in filas:
+        uno = Consumo(
+            llamadas=llamadas or 0,
+            entrada=entrada or 0,
+            salida=salida or 0,
+            cache_lectura=lectura or 0,
+            cache_escritura=escritura or 0,
+        )
+        total.llamadas += uno.llamadas
+        total.entrada += uno.entrada
+        total.salida += uno.salida
+        total.cache_lectura += uno.cache_lectura
+        total.cache_escritura += uno.cache_escritura
+        costo = uno.costo_usd(modelo)
+        if costo is None:
+            se_pudo_costear = False
+        else:
+            costo_total += costo
+        por_modelo.append({**uno.resumen(modelo), "modelo": modelo})
+    en_cache = (
+        round(100 * total.cache_lectura / total.entrada, 1) if total.entrada else 0.0
+    )
+    return {
+        "dias": dias,
+        "llamadas": total.llamadas,
+        "tokens_entrada": total.entrada,
+        "tokens_salida": total.salida,
+        "porcentaje_en_cache": en_cache,
+        "costo_usd": round(costo_total, 2) if se_pudo_costear else None,
+        "salida_por_llamada": (
+            round(total.salida / total.llamadas) if total.llamadas else 0
+        ),
+        "por_modelo": por_modelo,
+    }

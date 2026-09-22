@@ -383,18 +383,22 @@ function filas(datos, columnas, vacio) {
   return datos.join("");
 }
 
-// Gasto en el modelo desde el ultimo Deploy, no del periodo elegido.
+// Gasto en el modelo durante el mismo periodo que el resto de las tarjetas.
 // "En cache" bajo significa que el prompt se paga completo en cada mensaje.
 function tarjetasDeConsumo(c) {
   if (!c || !c.llamadas) return [];
+  var detalle = (c.por_modelo || []).map(function (m) {
+    return m.modelo + ": " + m.llamadas;
+  }).join(" · ");
   var tarjetas = [
-    tarjeta("En cache", c.porcentaje_en_cache + "%",
-            "del contexto, desde el ultimo Deploy"),
+    tarjeta("En cache", c.porcentaje_en_cache + "%", "del contexto enviado"),
   ];
   if (c.costo_usd !== null && c.costo_usd !== undefined) {
     tarjetas.push(tarjeta("Gasto del modelo", "$" + c.costo_usd.toFixed(2),
-                          c.llamadas + " llamadas desde el ultimo Deploy"));
+                          c.llamadas + " llamadas · " + c.dias + " dias"));
   }
+  tarjetas.push(tarjeta("Tokens por respuesta", c.salida_por_llamada,
+                        detalle || "promedio de salida"));
   return tarjetas;
 }
 

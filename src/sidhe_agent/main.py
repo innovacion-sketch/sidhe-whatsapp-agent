@@ -35,7 +35,14 @@ from .db.session import dispose_engine, get_engine, get_session
 from .graph.builder import build_graph
 from .memory.long_term import crear_extractor
 from .observability import configurar_logging, enmascarar_user_id
-from .services import agenda, conversaciones, cortesias, google_sheets, metricas
+from .services import (
+    agenda,
+    consumo,
+    conversaciones,
+    cortesias,
+    google_sheets,
+    metricas,
+)
 from .services import respuestas_rapidas
 from .services.transcription import transcribir_audio
 from .services.twilio_content import enviar_recordatorio
@@ -101,6 +108,7 @@ def crear_llm_principal(settings: Any) -> ChatAnthropic:
         api_key=settings.anthropic_api_key,
         max_tokens=1024,
         thinking={"type": "disabled"},
+        callbacks=[consumo.CONTADOR],
     )
 
 
@@ -126,6 +134,7 @@ async def lifespan(app: FastAPI):
         api_key=settings.anthropic_api_key,
         max_tokens=600,
         temperature=0.0,
+        callbacks=[consumo.CONTADOR],
     )
     app.state.graph = build_graph(
         llm,

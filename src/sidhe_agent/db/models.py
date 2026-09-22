@@ -9,6 +9,7 @@ import datetime
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Date,
     DateTime,
@@ -214,6 +215,28 @@ class RespuestaRapida(Base):
     actualizado_en: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class UsoModelo(Base):
+    """Tokens gastados por día y por modelo: la factura, medida en casa.
+
+    Una fila por (día, modelo) que se va sumando. En memoria no sirve: se
+    reinicia en cada Deploy y entonces el panel muestra un gasto ridículo
+    comparado con lo que cobra Anthropic a fin de mes.
+    """
+
+    __tablename__ = "uso_modelo"
+    __table_args__ = (UniqueConstraint("fecha", "modelo", name="uq_uso_fecha_modelo"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    fecha: Mapped[datetime.date] = mapped_column(Date, nullable=False)
+    modelo: Mapped[str] = mapped_column(String(60), nullable=False)
+    llamadas: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # Entrada TOTAL, con lo cacheado incluido (así lo reporta LangChain)
+    entrada: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    salida: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    cache_lectura: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    cache_escritura: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
 
 
 class CierreConversacion(Base):
