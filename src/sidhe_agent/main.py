@@ -166,6 +166,15 @@ async def lifespan(app: FastAPI):
         )
     )
     logger.info("canales_activos", canales=sorted(app.state.adapters))
+    # Trampa fácil: el DSN completo gana sobre los datos sueltos, así que si
+    # quedaron los dos puestos, los ASISTENCIAS_DB_* se ignoran en silencio.
+    if settings.asistencias_database_url and settings.asistencias_db_host:
+        logger.warning(
+            "asistencias_configurada_dos_veces",
+            usando="ASISTENCIAS_DATABASE_URL",
+            ignorando="ASISTENCIAS_DB_HOST y demas",
+            que_hacer="borra una de las dos formas",
+        )
     # La hoja de pedidos se relee sola: sin esto habria que empujarla desde
     # n8n y una sincronizacion olvidada es un cliente al que le decimos que
     # sus plantillas siguen en fabricacion cuando ya estan en la sucursal.
