@@ -30,7 +30,7 @@ def test_reconoce_el_tipo_de_pregunta():
 def test_una_pregunta_de_pedido_exige_consultar_el_pedido():
     """Contestar de memoria el estado de un pedido es el peor error posible."""
     assert categoria("ya están mis plantillas?")[1] == "consultar_estado_pedido"
-    assert categoria("¿dónde se ubican?")[1] == "buscar_sucursal"
+    assert categoria("¿dónde se ubica la de Perisur?")[1] == "buscar_sucursal"
     # En precios no se exige herramienta: salen de las FAQs del prompt
     assert categoria("¿cuánto cuesta?")[1] is None
 
@@ -72,3 +72,20 @@ def test_califica_la_herramienta_solo_cuando_se_espera_una():
 def test_una_respuesta_larguisima_no_sirve_para_whatsapp():
     notas, _, _ = calificar("a" * 2000, [], None, PRECIOS_REALES)
     assert notas["largo_ok"] == 0.0
+
+
+def test_sin_ciudad_no_se_exige_buscar_sucursal():
+    """Preguntar de qué ciudad es lo correcto; buscar a ciegas, no."""
+    from comparar_modelos import lugares
+
+    conocidos = lugares()
+    assert categoria("¿dónde se ubican?", conocidos) == ("sucursal", None)
+    assert categoria("dónde están ubicados", conocidos) == ("sucursal", None)
+
+
+def test_con_ciudad_si_se_exige():
+    from comparar_modelos import lugares
+
+    conocidos = lugares()
+    assert categoria("tienen sucursal en Monterrey?", conocidos)[1] == "buscar_sucursal"
+    assert categoria("dónde se ubica la de Perisur", conocidos)[1] == "buscar_sucursal"

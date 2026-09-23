@@ -27,6 +27,7 @@ Uso:
 
 import argparse
 import asyncio
+import csv
 import datetime
 import json
 import re
@@ -55,6 +56,7 @@ from sidhe_agent.services.cortesias import es_acuse  # noqa: E402
 SALIDA = RAIZ / ".claude" / "hillclimb" / "respuesta-whatsapp"
 RUTA_PROMPT = RAIZ / "src" / "sidhe_agent" / "graph" / "prompts" / "system.md"
 RUTA_FAQS = RAIZ / "data" / "faqs.json"
+RUTA_SUCURSALES = RAIZ / "data" / "sucursales.csv"
 
 MAX_CARACTERES_WHATSAPP = 1200
 
@@ -92,9 +94,31 @@ BANCARIOS = re.compile(r"\b\d{16,18}\b")
 PRECIOS = re.compile(r"\$\s?([\d,]{3,})")
 
 
-def categoria(texto: str) -> tuple[str, str | None]:
+def lugares() -> set[str]:
+    """Ciudades, zonas y nombres de sucursal, para saber si el cliente dijo dónde."""
+    palabras: set[str] = set()
+    with RUTA_SUCURSALES.open(encoding="utf-8") as archivo:
+        for fila in csv.DictReader(archivo):
+            crudo = " ".join(
+                (fila.get(c) or "").replace("|", " ")
+                for c in ("nombre", "alias", "ciudad", "zona")
+            )
+            for palabra in clave(crudo).split():
+                if len(palabra) > 3 and palabra not in ("liverpool", "plaza", "galerias"):
+                    palabras.add(palabra)
+    return palabras
+
+
+def categoria(texto: str, conocidos: set[str] | None = None) -> tuple[str, str | None]:
     for nombre, patron, herramienta in CATEGORIAS:
         if re.search(patron, texto, re.IGNORECASE):
+            # "¿Dónde se ubican?" sin ciudad NO debe llamar a buscar_sucursal:
+            # lo correcto es preguntar de dónde es. Solo se exige la
+            # herramienta cuando el cliente ya dijo un lugar.
+            if nombre == "sucursal":
+                dichas = set(clave(texto).split())
+                if not (dichas & (conocidos if conocidos is not None else lugares())):
+                    return nombre, None
             return nombre, herramienta
     return "otro", None
 
@@ -124,6 +148,7 @@ async def cargar_casos(cuantos: int, dias: int) -> list[dict]:
             )
         ).all()
 
+    conocidos = lugares()
     casos: list[dict] = []
     vistos: set[str] = set()
     por_categoria: dict[str, int] = {}
@@ -138,7 +163,7 @@ async def cargar_casos(cuantos: int, dias: int) -> list[dict]:
             # Fragmentos sueltos ("Guadalajara", "Si por favor"): fuera de su
             # conversación no se pueden evaluar.
             continue
-        cat, herramienta = categoria(limpio)
+        cat, herramienta = categoria(limpio, conocidos)
         if por_categoria.get(cat, 0) >= CUOTAS.get(cat, 0):
             continue
         vistos.add(firma)
