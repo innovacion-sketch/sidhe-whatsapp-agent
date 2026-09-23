@@ -60,6 +60,7 @@ def build_graph(
     system_prompt: str = "",
     extractor: Runnable | None = None,
     resumidor: BaseChatModel | None = None,
+    llm_agenda: BaseChatModel | None = None,
 ) -> Any:
     """Compila el grafo.
 
@@ -68,10 +69,11 @@ def build_graph(
     nodo resumir; default el mismo `llm`.
     """
     llm_con_tools = llm.bind_tools(TOOLS)
+    con_tools_agenda = llm_agenda.bind_tools(TOOLS) if llm_agenda else None
 
     grafo = StateGraph(AgentState)
     grafo.add_node("cargar_memoria", make_cargar_memoria(store))
-    grafo.add_node("agente", make_agente(llm_con_tools, system_prompt))
+    grafo.add_node("agente", make_agente(llm_con_tools, system_prompt, con_tools_agenda))
     grafo.add_node("tools", ToolNode(TOOLS))
     grafo.add_node("actualizar_memoria", make_actualizar_memoria(extractor, store))
     grafo.add_node("resumir", make_resumir(resumidor or llm))

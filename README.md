@@ -108,7 +108,8 @@ Notas de operación:
 |---|---|
 | `DATABASE_URL` | DSN de Postgres (`postgresql://...`), único para negocio y memoria |
 | `ANTHROPIC_API_KEY` | API key de Anthropic |
-| `ANTHROPIC_MODEL` | Default `claude-sonnet-5` |
+| `ANTHROPIC_MODEL` | Lo cotidiano. Default `claude-haiku-4-5` |
+| `ANTHROPIC_MODEL_AGENDA` | Flujo de citas. Default `claude-sonnet-5` |
 | `ANTHROPIC_MODEL_UTILITARIO` | Modelo de tareas internas (perfil/resúmenes). Default `claude-haiku-4-5` |
 | `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` | Credenciales de Twilio |
 | `TWILIO_WHATSAPP_FROM` | `whatsapp:+5215638955164` |

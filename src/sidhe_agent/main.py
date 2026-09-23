@@ -98,7 +98,7 @@ def _cargar_system_prompt() -> str:
     return RUTA_SYSTEM_PROMPT.read_text(encoding="utf-8")
 
 
-def crear_llm_principal(settings: Any) -> ChatAnthropic:
+def crear_llm(settings: Any, modelo: str) -> ChatAnthropic:
     """El modelo que atiende al cliente.
 
     Sin `temperature`: los modelos de Anthropic 4.6 en adelante la rechazan
@@ -107,7 +107,7 @@ def crear_llm_principal(settings: Any) -> ChatAnthropic:
     contesta bien sin él. Si algún día se quiere, se cambia aquí.
     """
     return ChatAnthropic(
-        model=settings.anthropic_model,
+        model=modelo,
         api_key=settings.anthropic_api_key,
         max_tokens=1024,
         thinking={"type": "disabled"},
@@ -130,7 +130,14 @@ async def lifespan(app: FastAPI):
     )
     await store.setup()
 
-    llm = crear_llm_principal(settings)
+    llm = crear_llm(settings, settings.anthropic_model)
+    # Modelo aparte para el flujo de citas (ver es_conversacion_de_cita)
+    llm_agenda = (
+        crear_llm(settings, settings.anthropic_model_agenda)
+        if settings.anthropic_model_agenda
+        and settings.anthropic_model_agenda != settings.anthropic_model
+        else None
+    )
     # LLM utilitario (extracción de perfil y resúmenes): determinista y barato
     llm_utilitario = ChatAnthropic(
         model=settings.anthropic_model_utilitario or settings.anthropic_model,
@@ -150,6 +157,7 @@ async def lifespan(app: FastAPI):
         system_prompt=system_prompt,
         extractor=crear_extractor(llm_utilitario),
         resumidor=llm_utilitario,
+        llm_agenda=llm_agenda,
     )
     app.state.adapter = WhatsAppTwilioAdapter(
         account_sid=settings.twilio_account_sid,
@@ -194,7 +202,12 @@ async def lifespan(app: FastAPI):
         )
     )
 
-    logger.info("app_iniciada", modelo=settings.anthropic_model)
+    logger.info(
+        "app_iniciada",
+        modelo=settings.anthropic_model,
+        modelo_agenda=settings.anthropic_model_agenda,
+        modelo_interno=settings.anthropic_model_utilitario,
+    )
     yield
 
     for tarea in (

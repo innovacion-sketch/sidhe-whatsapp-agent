@@ -73,7 +73,12 @@ class Settings(BaseSettings):
 
     # Anthropic
     anthropic_api_key: str = ""
-    anthropic_model: str = "claude-sonnet-5"
+    # Modelo de todos los días. La comparación con 30 preguntas reales
+    # (scripts/comparar_modelos.py) dio empate con Sonnet y 31% más rápido.
+    anthropic_model: str = "claude-haiku-4-5"
+    # El flujo de citas son seis o siete pasos encadenados y es lo único que
+    # esa comparación NO midió; ahí no se arriesga. Vacío = usar el de arriba.
+    anthropic_model_agenda: str = "claude-sonnet-5"
     # Modelo de las tareas internas que el cliente nunca ve (extracción de
     # perfil y resúmenes). Corre en CADA mensaje, así que con el modelo
     # grande se lleva casi un tercio del gasto sin mejorar la respuesta.

@@ -9,6 +9,7 @@ invalidar el caché en cada turno.
 
 import datetime
 import json
+import re
 from typing import Any, Awaitable, Callable
 from zoneinfo import ZoneInfo
 
@@ -129,15 +130,66 @@ def _log_resultados_de_tools(mensajes: list) -> None:
         )
 
 
+# Palabras con las que un cliente abre el tema de la cita
+PALABRAS_DE_AGENDA = re.compile(
+    r"\b(agend|cita|reagend|cancel|disponib|estudio de pisada|valoraci)",
+    re.IGNORECASE,
+)
+# Si el hilo ya tocó una de estas, sigue en manos del modelo grande
+TOOLS_DE_AGENDA = frozenset(
+    {
+        "consultar_disponibilidad",
+        "agendar_cita",
+        "cancelar_cita",
+        "consultar_mis_citas",
+        "buscar_sucursal",
+        "listar_zonas",
+        "presentar_opciones",
+    }
+)
+# Cuántos mensajes atrás se mira para saber si la conversación va de citas
+VENTANA_DE_AGENDA = 8
+
+
+def es_conversacion_de_cita(state: AgentState) -> bool:
+    """Si este turno necesita el modelo grande.
+
+    Agendar son seis o siete pasos encadenados y es lo único que no se pudo
+    medir en la comparación de modelos; ahí no se ahorra. Lo demás —precios,
+    horarios, estado de pedido— salió idéntico con el modelo chico.
+
+    La decisión es determinista a propósito: preguntarle a un modelo "¿esto
+    es una cita?" costaría otra llamada y anularía el ahorro.
+    """
+    if state.get("ui_pendiente"):
+        # Hay botones esperando: la respuesta del cliente es parte del flujo
+        return True
+    mensajes = state.get("messages", []) or []
+    for mensaje in reversed(mensajes[-VENTANA_DE_AGENDA:]):
+        if getattr(mensaje, "name", None) in TOOLS_DE_AGENDA:
+            return True
+        contenido = getattr(mensaje, "content", "")
+        if isinstance(contenido, str) and PALABRAS_DE_AGENDA.search(contenido):
+            return True
+    return False
+
+
 def make_agente(
-    llm_con_tools: Runnable, system_prompt: str
+    llm_con_tools: Runnable,
+    system_prompt: str,
+    llm_agenda: Runnable | None = None,
 ) -> Callable[[AgentState], Awaitable[dict[str, Any]]]:
+    """`llm_agenda` atiende el flujo de citas; si es None, todo va al mismo."""
+
     async def agente(state: AgentState) -> dict[str, Any]:
         _log_resultados_de_tools(state["messages"])
         system = SystemMessage(content=_bloques_system(system_prompt, state))
+        modelo = llm_con_tools
+        if llm_agenda is not None and es_conversacion_de_cita(state):
+            modelo = llm_agenda
         # El gasto se mide con un callback en el modelo (services/consumo.py),
         # no aquí: así también entran el extractor de perfil y el resumidor.
-        respuesta = await llm_con_tools.ainvoke([system, *state["messages"]])
+        respuesta = await modelo.ainvoke([system, *state["messages"]])
         for llamada in getattr(respuesta, "tool_calls", []) or []:
             logger.info(
                 "tool_solicitada",

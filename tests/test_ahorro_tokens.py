@@ -6,7 +6,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from sidhe_agent.config import Settings
 from sidhe_agent.graph.nodes import CADA_CUANTOS_MENSAJES, toca_extraer
-from sidhe_agent.main import crear_llm_principal
+from sidhe_agent.main import crear_llm
 
 
 def _conversacion(mensajes_del_cliente: int) -> list:
@@ -49,9 +49,7 @@ def test_la_ventana_del_extractor_cubre_lo_que_se_salta():
 
 def test_el_llm_principal_no_manda_temperature():
     """Los modelos 4.6 en adelante la rechazan con error 400."""
-    llm = crear_llm_principal(
-        SimpleNamespace(anthropic_model="claude-sonnet-5", anthropic_api_key="test")
-    )
+    llm = crear_llm(SimpleNamespace(anthropic_api_key="test"), "claude-sonnet-5")
     assert llm.temperature is None
     assert llm.thinking == {"type": "disabled"}
 
@@ -77,7 +75,15 @@ def test_el_rag_no_devuelve_relleno_cuando_nada_coincide():
     assert filtrar_resultados([("texto cualquiera", "Guía", 0.9)]) == []
 
 
-def test_las_tareas_internas_usan_un_modelo_mas_barato():
+def test_las_tareas_internas_usan_un_modelo_barato():
+    """El extractor y el resumidor escriben para el bot, no para el cliente."""
     ajustes = Settings(anthropic_api_key="test")
-    assert ajustes.anthropic_model_utilitario != ajustes.anthropic_model
     assert "haiku" in ajustes.anthropic_model_utilitario
+
+
+def test_lo_cotidiano_va_en_haiku_y_las_citas_en_sonnet():
+    """Medido con 30 preguntas reales: empate en lo cotidiano, y el flujo
+    de citas -que no se pudo medir- se queda con el modelo grande."""
+    ajustes = Settings(anthropic_api_key="test")
+    assert "haiku" in ajustes.anthropic_model
+    assert "sonnet" in ajustes.anthropic_model_agenda
