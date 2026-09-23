@@ -89,6 +89,22 @@ SQL_SIN_CHECADA = text(
 )
 
 
+SQL_TURNOS = text(
+    """
+    SELECT s.nombre, hp.fecha, hp.hora_entrada, hp.hora_salida
+      FROM horarios_programados hp
+      JOIN empleados e ON e.id = hp.empleado_id
+      JOIN sucursales s ON s.id = e.sucursal_principal_id
+     WHERE hp.fecha BETWEEN :desde AND :hasta
+       AND hp.es_descanso = false
+       AND hp.hora_entrada IS NOT NULL
+       AND hp.hora_salida IS NOT NULL
+       AND e.activo = true
+     ORDER BY s.nombre, hp.fecha, hp.hora_entrada
+    """
+).bindparams(bindparam("desde", type_=Date()), bindparam("hasta", type_=Date()))
+
+
 def configurado() -> bool:
     return bool(get_settings().asistencias_url)
 
@@ -139,6 +155,28 @@ async def dias_sin_personal(
     sin_personal = {(nombre, fecha) for nombre, fecha in filas}
     logger.info("dias_sin_personal", dias=len(sin_personal))
     return sin_personal
+
+
+async def turnos(
+    desde: datetime.date, hasta: datetime.date
+) -> dict[tuple[str, datetime.date], list[tuple]] | None:
+    """Turnos programados por (sucursal, fecha). None si no se pudo consultar.
+
+    Sirve para lo que `dias_sin_personal` no ve: que haya gente ese día pero
+    no a la hora de la cita.
+    """
+    filas = await _consultar(SQL_TURNOS, {"desde": desde, "hasta": hasta})
+    if filas is None:
+        return None
+    por_dia: dict[tuple[str, datetime.date], list[tuple]] = {}
+    for nombre, fecha, entrada, salida in filas:
+        por_dia.setdefault((nombre, fecha), []).append((entrada, salida))
+    return por_dia
+
+
+def hay_quien_atienda(turnos_del_dia: list[tuple], hora: datetime.time) -> bool:
+    """Si algún turno de ese día cubre esa hora."""
+    return any(entrada <= hora <= salida for entrada, salida in turnos_del_dia)
 
 
 async def sucursales_sin_checada(

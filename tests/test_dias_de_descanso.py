@@ -93,6 +93,43 @@ def test_el_bot_le_avisa_al_cliente_que_esa_sucursal_descansa():
     assert "descansa" not in _a_dict(perisur)
 
 
+def test_una_cita_fuera_del_turno_no_tiene_quien_la_atienda():
+    """Hay gente ese día, pero la cita cae cuando ya se fueron."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+    from citas_sin_personal import clasificar
+
+    from sidhe_agent.services.asistencias import hay_quien_atienda
+
+    turno = [(datetime.time(11, 0), datetime.time(17, 0))]
+    assert hay_quien_atienda(turno, datetime.time(13, 0))
+    assert not hay_quien_atienda(turno, datetime.time(19, 0))
+
+    comunes = dict(nombre="Liverpool Perisur", fecha=MARTES, dias_operacion=None,
+                   sin_personal=set(), turnos={("Liverpool Perisur", MARTES): turno})
+    assert clasificar(hora=datetime.time(13, 0), **comunes) == "OK"
+    assert clasificar(hora=datetime.time(19, 0), **comunes) == "FUERA"
+
+
+def test_sin_rol_cargado_no_se_confunde_con_sin_personal():
+    """Distinguirlos importa: uno es un problema y el otro es no saber."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+    from citas_sin_personal import clasificar
+
+    comunes = dict(nombre="Liverpool Perisur", fecha=MARTES,
+                   hora=datetime.time(13, 0), dias_operacion=None)
+    assert clasificar(sin_personal=set(), turnos={}, **comunes) == "SIN ROL"
+    assert clasificar(sin_personal=set(), turnos=None, **comunes) == "SIN ROL"
+    assert clasificar(
+        sin_personal={("Liverpool Perisur", MARTES)}, turnos={}, **comunes
+    ) == "CERRADO"
+
+
 def test_el_rol_de_otra_sucursal_no_afecta():
     retirar = dias_a_retirar(
         "Liverpool Perisur", SEMANA, {("Liverpool Coapa", MARTES)}, None
