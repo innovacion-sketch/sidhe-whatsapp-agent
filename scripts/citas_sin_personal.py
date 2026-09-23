@@ -28,27 +28,7 @@ from sqlalchemy import select
 from sidhe_agent.db.models import Cita, Slot, Sucursal
 from sidhe_agent.db.session import dispose_engine, get_session
 from sidhe_agent.services import asistencias
-from sidhe_agent.services.agenda import DIAS_SEMANA
-
-
-def clasificar(
-    nombre: str,
-    fecha: datetime.date,
-    hora: datetime.time,
-    dias_operacion: list | None,
-    sin_personal: set,
-    turnos: dict | None,
-) -> str:
-    if DIAS_SEMANA[fecha.weekday()] not in set(dias_operacion or DIAS_SEMANA):
-        return "DESCANSO"
-    if (nombre, fecha) in sin_personal:
-        return "CERRADO"
-    if turnos is None:
-        return "SIN ROL"
-    del_dia = turnos.get((nombre, fecha))
-    if not del_dia:
-        return "SIN ROL"
-    return "OK" if asistencias.hay_quien_atienda(del_dia, hora) else "FUERA"
+from sidhe_agent.services.alertas_citas import ESTADOS, clasificar
 
 
 async def main() -> None:
@@ -99,7 +79,7 @@ async def main() -> None:
         )
 
     print(f"\nCitas revisadas: {len(filas)} en los proximos {args.dias} dias")
-    for estado in ("CERRADO", "DESCANSO", "FUERA", "SIN ROL", "OK"):
+    for estado in ESTADOS:
         if conteo.get(estado):
             print(f"  {estado:9} {conteo[estado]}")
     if conteo.get("SIN ROL"):

@@ -21,12 +21,15 @@ from ..db.models import Cita, Slot, Sucursal
 from ..db.session import get_session
 from ..tools.citas import fecha_legible
 from . import asistencias, correo
+from .agenda import DIAS_SEMANA
 
 logger = structlog.get_logger(__name__)
 
 # Lo ya avisado, para no repetir: (fecha, sucursal) para el aviso del día y
 # ("cerrado", fecha, sucursal) para el anticipado
 _avisadas: set[tuple] = set()
+# Día en que se mandó la última revisión semanal
+_ultima_revision: datetime.date | None = None
 
 
 def redactar(sucursal: str, fecha: datetime.date, citas: list[dict], hora: str) -> tuple[str, str]:
@@ -184,17 +187,136 @@ async def revisar() -> int:
     return enviados
 
 
+ESTADOS = ("CERRADO", "DESCANSO", "FUERA", "SIN ROL", "OK")
+
+
+def clasificar(
+    nombre: str,
+    fecha: datetime.date,
+    hora: datetime.time,
+    dias_operacion: list | None,
+    sin_personal: set,
+    turnos: dict | None,
+) -> str:
+    """En qué situación queda una cita frente al rol de personal.
+
+    CERRADO  el rol no tiene a nadie ese día en esa sucursal
+    DESCANSO día de descanso fijo de la sucursal
+    FUERA    hay gente ese día, pero nadie a la hora de la cita
+    SIN ROL  esa semana todavía no se carga: no se sabe
+    OK       alguien programado cubre esa hora
+    """
+    if DIAS_SEMANA[fecha.weekday()] not in set(dias_operacion or DIAS_SEMANA):
+        return "DESCANSO"
+    if (nombre, fecha) in sin_personal:
+        return "CERRADO"
+    del_dia = (turnos or {}).get((nombre, fecha))
+    if not del_dia:
+        return "SIN ROL"
+    return "OK" if asistencias.hay_quien_atienda(del_dia, hora) else "FUERA"
+
+
+async def revisar_citas_futuras(dias: int = 21) -> tuple[list[dict], dict[str, int]]:
+    """Clasifica cada cita futura. Devuelve (las problemáticas, conteos)."""
+    hoy = datetime.datetime.now(ZoneInfo(get_settings().tz)).date()
+    hasta = hoy + datetime.timedelta(days=dias)
+    sin_personal = await asistencias.dias_sin_personal(hoy, hasta)
+    turnos = await asistencias.turnos(hoy, hasta)
+
+    problemas: list[dict] = []
+    conteo: dict[str, int] = {}
+    for cita, slot, sucursal in await _citas_confirmadas(hoy, hasta):
+        estado = clasificar(
+            sucursal.nombre,
+            slot.fecha,
+            slot.hora_inicio,
+            sucursal.dias_operacion,
+            sin_personal,
+            turnos,
+        )
+        conteo[estado] = conteo.get(estado, 0) + 1
+        if estado != "OK":
+            problemas.append(
+                {
+                    "estado": estado,
+                    "fecha": slot.fecha,
+                    "sucursal": sucursal.nombre,
+                    **_resumir(cita, slot),
+                }
+            )
+    return problemas, conteo
+
+
+def redactar_revision(problemas: list[dict], conteo: dict[str, int], dias: int):
+    """Asunto y cuerpo de la revisión semanal."""
+    con_problema = sum(v for k, v in conteo.items() if k not in ("OK", "SIN ROL"))
+    total = sum(conteo.values())
+    asunto = (
+        f"Revisión semanal de citas: {con_problema} por atender de {total}"
+        if con_problema
+        else f"Revisión semanal de citas: las {total} tienen quién las atienda"
+    )
+    lineas = [f"Citas confirmadas en los próximos {dias} días: {total}", ""]
+    for estado in ESTADOS:
+        if conteo.get(estado):
+            lineas.append(f"  {estado:9} {conteo[estado]}")
+    if con_problema:
+        lineas += ["", "A revisar:", ""]
+        for p in problemas:
+            if p["estado"] == "SIN ROL":
+                continue
+            lineas.append(
+                f"  {p['estado']:9} {p['fecha']} {p['hora']}  {p['sucursal']}  "
+                f"{p['cliente']}  {p['telefono']}  (folio {p['folio']})"
+            )
+    if conteo.get("SIN ROL"):
+        lineas += [
+            "",
+            f"Hay {conteo['SIN ROL']} cita(s) en semanas cuyo rol todavía no se",
+            "carga. No es que falte personal: es que aún no se sabe. Al cargar",
+            "esas semanas conviene volver a revisar.",
+        ]
+    lineas += ["", "-- Bot de WhatsApp de Sidhe"]
+    return asunto, "\n".join(lineas)
+
+
+def toca_revision_semanal(
+    ahora: datetime.datetime, ultima: datetime.date | None, dia: int, hora: int
+) -> bool:
+    """Si toca mandar la revisión: el día acordado, pasada la hora, una vez."""
+    if ahora.weekday() != dia or ahora.hour < hora:
+        return False
+    return ultima != ahora.date()
+
+
+async def enviar_revision_semanal(dias: int = 21) -> bool:
+    problemas, conteo = await revisar_citas_futuras(dias)
+    if not conteo:
+        return False
+    asunto, cuerpo = redactar_revision(problemas, conteo, dias)
+    return await correo.enviar(asunto, cuerpo)
+
+
 async def vigilar(cada_minutos: int = 30, espera_inicial: float = 60.0) -> None:
     """Revisa cada tanto durante el horario de tiendas. No muere por errores."""
+    global _ultima_revision
     await asyncio.sleep(espera_inicial)
     ajustes = get_settings()
     while True:
         try:
-            hora = datetime.datetime.now(ZoneInfo(ajustes.tz)).hour
-            if ajustes.alerta_citas_desde <= hora <= ajustes.alerta_citas_hasta:
+            ahora = datetime.datetime.now(ZoneInfo(ajustes.tz))
+            if ajustes.alerta_citas_desde <= ahora.hour <= ajustes.alerta_citas_hasta:
                 await revisar()
                 # Y los días que el rol ya dio por cerrados, con anticipación
                 await avisar_dias_cerrados()
+            # Repaso completo de la semana, el día acordado
+            if toca_revision_semanal(
+                ahora,
+                _ultima_revision,
+                ajustes.revision_semanal_dia,
+                ajustes.revision_semanal_hora,
+            ) and await enviar_revision_semanal(ajustes.revision_semanal_dias):
+                _ultima_revision = ahora.date()
         except asyncio.CancelledError:
             raise
         except Exception:

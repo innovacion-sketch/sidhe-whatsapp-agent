@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     # A qué hora se revisa si las citas de hoy tienen quién las atienda
     alerta_citas_desde: int = 11
     alerta_citas_hasta: int = 19
+    # Repaso completo de las citas de las próximas semanas: 0 = lunes
+    revision_semanal_dia: int = 0
+    revision_semanal_hora: int = 9
+    revision_semanal_dias: int = 21
 
     # Anthropic
     anthropic_api_key: str = ""
