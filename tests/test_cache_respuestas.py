@@ -154,3 +154,50 @@ def test_la_huella_cambia_si_cambia_el_prompt():
     assert primera != segunda
     assert huella_actual() == segunda
     assert len(segunda) <= 32
+
+
+def test_no_se_guarda_una_conversacion_ya_cargada_de_contexto():
+    """Casos reales que se colaron: citas de una persona servidas a otra."""
+    from sidhe_agent.services.cache_respuestas import es_conversacion_temprana
+
+    charla_larga = [HumanMessage(content=f"mensaje {i}") for i in range(5)]
+    assert not es_conversacion_temprana(charla_larga)
+    assert es_conversacion_temprana(TURNO_SIN_TOOLS)
+
+    assert not apta_para_guardar(
+        "¿hay problema con la edad?", "Perfecto, nos vemos el miércoles 23 a las 19:00.",
+        TURNO_SIN_TOOLS,
+    )
+
+
+def test_una_respuesta_que_habla_de_esa_charla_no_se_guarda():
+    for respuesta in [
+        "Nos vemos el miércoles 23 a las 19:00",
+        "Elige el día de las opciones que te mostré arriba",
+        "Agendamos tu cita para el 8 de octubre",
+        "Como te comenté, el precio es $2,199",
+        "Ya tienes tu cita en Satélite",
+    ]:
+        assert not apta_para_guardar(
+            "¿cuánto cuesta?", respuesta, TURNO_SIN_TOOLS
+        ), respuesta
+
+
+def test_una_tool_en_cualquier_momento_de_la_charla_invalida():
+    """Antes solo se miraba el ultimo turno y el contexto se colaba igual."""
+    charla = [
+        HumanMessage(content="mis plantillas?"),
+        ToolMessage(content="{}", tool_call_id="1"),
+        AIMessage(content="siguen en proceso"),
+        HumanMessage(content="¿y cuánto cuestan las nuevas?"),
+    ]
+    assert not apta_para_guardar("¿y cuánto cuestan?", "Cuestan $2,199", charla)
+
+
+def test_un_reclamo_no_es_una_pregunta():
+    """'no fue lo QUE me ofrecieron' entraba por la palabra 'que'."""
+    assert not es_pregunta_generica("Realmente eso no fue lo que me ofrecieron")
+    assert not es_pregunta_generica("eso no es lo que me dijeron ayer")
+    # Una pregunta de verdad sigue entrando
+    assert es_pregunta_generica("¿qué precio tienen las plantillas?")
+    assert es_pregunta_generica("cuanto cuesta el estudio")

@@ -58,11 +58,17 @@ TRAMITE = re.compile(
 # Tiene que parecer una pregunta de verdad. "Si sobre los precios" es la
 # respuesta a algo que preguntó el bot: fuera de esa conversación no
 # significa nada, y reusar su respuesta con otro cliente es una apuesta.
+# Sin "que" ni "porque": en español aparecen en cualquier frase relativa
+# ("no fue lo QUE me ofrecieron") y dejaban pasar mensajes que no preguntan
+# nada. Si el mensaje trae "?", igual entra por ahí.
 INTERROGATIVAS = re.compile(
-    r"\b(que|cual|cuales|cuanto|cuanta|cuantos|cuantas|cuando|donde|como|quien|"
-    r"porque|hacen|tienen|puedo|puedes|pueden|aceptan|manejan|venden|cuesta|"
-    r"cuestan|vale|valen|sale|salen|hay|sirve|sirven|incluye|incluyen|dura|"
-    r"duran|tarda|tardan|necesito|requiere|requieren|atienden|abren|cierran)\b",
+    r"\b(cual|cuales|cuanto|cuanta|cuantos|cuantas|cuando|donde|quien|"
+    r"hacen|tienen|puedo|puedes|pueden|aceptan|manejan|venden|cuesta|"
+    # Solo verbos y pronombres interrogativos: un sustantivo como "precios"
+    # convierte "Si sobre los precios" -que es una respuesta, no una
+    # pregunta- en algo cacheable.
+    r"cuestan|vale|valen|sale|salen|sirve|sirven|incluye|incluyen|dura|"
+    r"duran|tarda|tardan|requiere|requieren|atienden|abren|cierran|manejan)\b",
     re.IGNORECASE,
 )
 
@@ -110,15 +116,41 @@ def es_pregunta_generica(texto: str) -> bool:
     return lleva_signo or bool(INTERROGATIVAS.search(normalizado))
 
 
+# Cuántos mensajes del cliente pueden llevar antes de que la conversación
+# tenga demasiado contexto propio como para reusar nada de ella
+MAX_MENSAJES_DEL_CLIENTE = 3
+
+# Señales de que la respuesta habla de ESA conversación y no del catálogo:
+# una cita concreta, una hora, algo que se dijo antes.
+CONTEXTUAL = re.compile(
+    # Ojo con la hora suelta y el día suelto: "de 11:00 a 21:00, de lunes a
+    # domingo" es el horario de las FAQs y sí se puede reusar. Lo que delata
+    # una cita concreta es el día CON número ("miércoles 23") o una fecha.
+    r"(\b(lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)\s+\d{1,2}\b"
+    r"|\b\d{1,2} de (enero|febrero|marzo|abril|mayo|junio|julio|agosto|"
+    r"septiembre|octubre|noviembre|diciembre)\b"
+    r"|\bnos vemos\b|\bte mostr[eé]\b|\bde arriba\b|\bopciones que\b"
+    r"|\bcomo te (coment[eé]|dije)\b|\bseguimos con\b|\btu cita\b"
+    r"|\bqued[oó] tu\b|\bya tienes\b|\bagendamos tu\b|\bmostr[eé] arriba\b)",
+    re.IGNORECASE,
+)
+
+
 def _hubo_herramientas(mensajes: list) -> bool:
-    """Si en el último turno el bot consultó algo (pedido, agenda, sucursal)."""
-    for mensaje in reversed(mensajes or []):
-        tipo = type(mensaje).__name__
-        if tipo == "ToolMessage":
-            return True
-        if tipo == "HumanMessage":
-            return False
-    return False
+    """Si la conversación consultó algo EN CUALQUIER momento.
+
+    Mirar solo el último turno no alcanzaba: si el bot consultó la agenda
+    tres mensajes antes, esa información sigue en el contexto y se cuela en
+    la respuesta. Así se guardó una que decía "nos vemos el miércoles 23 a
+    las 19:00" — la cita de una persona, lista para dársela a otra.
+    """
+    return any(type(m).__name__ == "ToolMessage" for m in mensajes or [])
+
+
+def es_conversacion_temprana(mensajes: list) -> bool:
+    """Si la charla aún no acumuló contexto propio."""
+    del_cliente = sum(1 for m in mensajes or [] if type(m).__name__ == "HumanMessage")
+    return del_cliente <= MAX_MENSAJES_DEL_CLIENTE
 
 
 def apta_para_guardar(
@@ -134,7 +166,9 @@ def apta_para_guardar(
         return False
     if not es_pregunta_generica(pregunta):
         return False
-    if _hubo_herramientas(mensajes):
+    if _hubo_herramientas(mensajes) or not es_conversacion_temprana(mensajes):
+        return False
+    if CONTEXTUAL.search(respuesta):
         return False
     # El bot lo tuteó por su nombre: esa respuesta es de esa persona
     nombre = (nombre_cliente or "").strip()
