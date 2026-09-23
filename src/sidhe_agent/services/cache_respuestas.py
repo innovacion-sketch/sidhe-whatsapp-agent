@@ -112,6 +112,11 @@ def es_pregunta_generica(texto: str) -> bool:
     normalizado = _normalizar(limpio)
     if PERSONAL.search(normalizado) or TRAMITE.search(normalizado):
         return False
+    # "Cuánto cuesta" a secas no se puede contestar sin saber de qué se
+    # hablaba: así se guardó el precio de la Plantilla Inteligente como
+    # respuesta a cualquiera que preguntara el precio de cualquier cosa.
+    if not _palabras_propias(limpio):
+        return False
     lleva_signo = "?" in limpio or "¿" in limpio
     return lleva_signo or bool(INTERROGATIVAS.search(normalizado))
 
@@ -131,9 +136,33 @@ CONTEXTUAL = re.compile(
     r"septiembre|octubre|noviembre|diciembre)\b"
     r"|\bnos vemos\b|\bte mostr[eé]\b|\bde arriba\b|\bopciones que\b"
     r"|\bcomo te (coment[eé]|dije)\b|\bseguimos con\b|\btu cita\b"
-    r"|\bqued[oó] tu\b|\bya tienes\b|\bagendamos tu\b|\bmostr[eé] arriba\b)",
+    r"|\bqued[oó] tu\b|\bya tienes\b|\bagendamos tu\b|\bmostr[eé] arriba\b"
+    # Da por hecho quién es el paciente. "Ahí evalúan la pisada de tu hijo"
+    # se guardó de una charla sobre un niño; a quien pregunta para sí mismo
+    # esa respuesta le llega equivocada.
+    r"|\btu (hij[oa]|ni[ñn][oa]|peque|esposa?|esposo|mam[aá]|pap[aá])\b)",
     re.IGNORECASE,
 )
+
+# Palabras que no dicen de qué se está hablando: si al quitarlas no queda
+# nada, la pregunta se apoyaba en la conversación.
+VACIAS = {
+    "el", "la", "los", "las", "un", "una", "unos", "unas", "lo", "al", "del",
+    "de", "en", "para", "por", "con", "sin", "sobre", "y", "o", "que", "se",
+    "es", "son", "esta", "estan", "hay", "me", "te", "le", "mi", "tu", "su",
+    "sus", "no", "si", "mas", "muy", "ya", "eso", "esto", "esa", "ese", "aqui",
+    "hola", "buenas", "buenos", "dias", "tardes", "noches", "gracias", "porfa",
+    "favor", "disculpa", "oye", "ok", "okey", "pues", "bueno", "tambien",
+}
+
+
+def _palabras_propias(texto: str) -> list[str]:
+    """Lo que la pregunta dice por sí misma, sin la fórmula interrogativa."""
+    return [
+        p
+        for p in clave(texto).split()
+        if len(p) >= 4 and p not in VACIAS and not INTERROGATIVAS.fullmatch(p)
+    ]
 
 
 def _hubo_herramientas(mensajes: list) -> bool:

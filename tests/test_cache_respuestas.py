@@ -201,3 +201,36 @@ def test_un_reclamo_no_es_una_pregunta():
     # Una pregunta de verdad sigue entrando
     assert es_pregunta_generica("¿qué precio tienen las plantillas?")
     assert es_pregunta_generica("cuanto cuesta el estudio")
+
+
+def test_una_pregunta_que_se_apoya_en_la_charla_no_se_guarda():
+    """'Cuánto cuesta' a secas: el bot sabía de qué producto, el siguiente no.
+
+    Se guardó con el precio de la Plantilla Inteligente porque esa charla
+    venía hablando de un niño, y quedó como respuesta al precio de
+    cualquier cosa.
+    """
+    assert not es_pregunta_generica("Cuánto cuesta")
+    assert not es_pregunta_generica("y cuanto cuesta?")
+    assert not es_pregunta_generica("¿cuánto sale?")
+    # Diciendo de qué, sí sirve para cualquiera
+    assert es_pregunta_generica("Cuánto cuesta el estudio de pisada")
+    assert es_pregunta_generica("cuanto cuestan las plantillas")
+
+
+def test_una_respuesta_que_supone_quien_es_el_paciente_no_se_guarda():
+    """'Evalúan la pisada de tu hijo' venía de una charla sobre un niño."""
+    for respuesta in [
+        "La valoración no tiene costo: ahí evalúan la pisada de tu hijo.",
+        "Con gusto revisamos a tu niña sin costo.",
+        "Puede venir con tu esposa el día que gusten.",
+    ]:
+        assert not apta_para_guardar(
+            "¿cuánto cuesta la consulta?", respuesta, TURNO_SIN_TOOLS
+        ), respuesta
+    # Hablarle de su propia pisada sigue siendo del catálogo
+    assert apta_para_guardar(
+        "¿cuánto cuesta la consulta?",
+        "No tiene costo: el fisioterapeuta evalúa tu pisada.",
+        TURNO_SIN_TOOLS,
+    )
