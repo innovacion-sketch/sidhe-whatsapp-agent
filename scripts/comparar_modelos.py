@@ -77,7 +77,7 @@ CATEGORIAS = [
     ("cita", r"\b(agendar|agenda|cita|estudio de pisada|valoraci[o\u00f3]n)\b", None),
     ("sucursal",
      r"\b(sucursal|sucursales|direcci[o\u00f3]n|ubicaci[o\u00f3]n|"
-     r"d[o\u00f3]nde (est[a\u00e1]n|se ubican?|se encuentran?|los encuentro|hay))\b",
+     r"d[o\u00f3]nde (est[a\u00e1][ns]?|se ubican?|se encuentran?|los encuentro|hay))\b",
      "buscar_sucursal"),
     ("horario", r"\b(horario|a qu[e\u00e9] hora|abren|cierran)\b", None),
 ]
