@@ -46,6 +46,10 @@ from sidhe_agent.db.models import Mensaje  # noqa: E402
 from sidhe_agent.db.session import dispose_engine, get_session  # noqa: E402
 from sidhe_agent.graph.builder import TOOLS  # noqa: E402
 from sidhe_agent.graph.nodes import _bloques_system  # noqa: E402
+from sidhe_agent.services.cache_respuestas import (  # noqa: E402
+    clave,
+    es_pregunta_generica,
+)
 from sidhe_agent.services.cortesias import es_acuse  # noqa: E402
 
 SALIDA = RAIZ / ".claude" / "hillclimb" / "respuesta-whatsapp"
@@ -57,16 +61,31 @@ MAX_CARACTERES_WHATSAPP = 1200
 # Qué herramienta debería usar cada tipo de pregunta. None = no exigimos
 # ninguna en particular (saludos, dudas generales que salen de las FAQs).
 CATEGORIAS = [
-    ("pedido", r"\b(plantilla|pedido|orden)\w*\b.{0,30}\b(list|lleg|tard|entreg)",
+    # El orden importa: gana el primero que coincida. Precio antes que cita,
+    # porque "cuanto cuesta la valoracion" es una pregunta de precio.
+    ("precio",
+     r"\b(precio|costo|cu[a\u00e1]nto[s]? (cuesta|cuestan|sale|salen|vale|valen))\b",
+     None),
+    ("pedido",
+     r"\b(plantilla|pedido|orden|estudio)\w*\b.{0,40}\b(list|lleg|tard|entreg|recog)",
      "consultar_estado_pedido"),
-    ("pedido", r"\bya (estan|están|quedaron)\b", "consultar_estado_pedido"),
-    ("cita", r"\b(agendar|cita|estudio de pisada|valoraci[oó]n)\b", None),
+    ("pedido",
+     r"\b(ya (estan|est\u00e1n|quedaron|salieron)|mi pedido|mis plantillas)\b",
+     "consultar_estado_pedido"),
+    # Cancelar va antes que cita: "cancelar mi cita" es lo m\u00e1s espec\u00edfico
     ("cancelar", r"\b(cancel|reagend|cambiar la cita)\w*", None),
-    ("sucursal", r"\b(sucursal|direcci[oó]n|d[oó]nde est[aá]n|ubicaci[oó]n)\b",
+    ("cita", r"\b(agendar|agenda|cita|estudio de pisada|valoraci[o\u00f3]n)\b", None),
+    ("sucursal",
+     r"\b(sucursal|sucursales|direcci[o\u00f3]n|ubicaci[o\u00f3]n|"
+     r"d[o\u00f3]nde (est[a\u00e1]n|se ubican?|se encuentran?|los encuentro|hay))\b",
      "buscar_sucursal"),
-    ("precio", r"\b(precio|costo|cu[aá]nto[s]? (cuesta|cuestan|sale|salen|vale|valen))\b", None),
-    ("horario", r"\b(horario|a qu[eé] hora|abren|cierran)\b", None),
+    ("horario", r"\b(horario|a qu[e\u00e9] hora|abren|cierran)\b", None),
 ]
+
+# Cuántos casos de cada tipo. Muestrear por categoría y no por frecuencia:
+# si no, el top lo acaparan los saludos y no se prueba nada interesante.
+CUOTAS = {"pedido": 6, "cita": 6, "precio": 5, "sucursal": 4, "horario": 3,
+          "cancelar": 2, "otro": 4}
 
 PROHIBIDAS = ("confort",)
 BANCARIOS = re.compile(r"\b\d{16,18}\b")
@@ -105,14 +124,25 @@ async def cargar_casos(cuantos: int, dias: int) -> list[dict]:
             )
         ).all()
 
-    casos, vistos = [], set()
+    casos: list[dict] = []
+    vistos: set[str] = set()
+    por_categoria: dict[str, int] = {}
     for texto, veces in filas:
         limpio = " ".join(texto.split())
-        clave = limpio.lower()
-        if clave in vistos or es_acuse(limpio):
+        # Misma clave que el caché: sin acentos ni signos, así "Dónde se
+        # ubican?" y "donde se ubican" no ocupan dos lugares.
+        firma = clave(limpio)
+        if not firma or firma in vistos or es_acuse(limpio):
             continue
-        vistos.add(clave)
+        if not es_pregunta_generica(limpio) and len(firma.split()) < 4:
+            # Fragmentos sueltos ("Guadalajara", "Si por favor"): fuera de su
+            # conversación no se pueden evaluar.
+            continue
         cat, herramienta = categoria(limpio)
+        if por_categoria.get(cat, 0) >= CUOTAS.get(cat, 0):
+            continue
+        vistos.add(firma)
+        por_categoria[cat] = por_categoria.get(cat, 0) + 1
         casos.append(
             {
                 "prompt_id": f"caso_{len(casos) + 1:03d}",
