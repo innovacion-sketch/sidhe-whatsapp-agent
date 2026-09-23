@@ -23,6 +23,7 @@ def test_el_contexto_temporal_no_invalida_el_cache():
     """El bloque cacheado debe quedar intacto; la fecha va en el dinamico."""
     bloques = _bloques_system("PROMPT", {"perfil": {"nombre": "Ana"}})
     assert bloques[0]["text"] == "PROMPT"
-    assert bloques[0]["cache_control"] == {"type": "ephemeral"}
+    assert bloques[0]["cache_control"]["type"] == "ephemeral"
+    assert bloques[0]["cache_control"]["ttl"] in ("5m", "1h")
     assert "cache_control" not in bloques[1]
     assert "Ana" in bloques[1]["text"]

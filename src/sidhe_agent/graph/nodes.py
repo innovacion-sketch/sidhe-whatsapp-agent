@@ -92,7 +92,10 @@ def _bloques_system(system_prompt: str, state: AgentState) -> list[dict[str, Any
         {
             "type": "text",
             "text": system_prompt,
-            "cache_control": {"type": "ephemeral"},
+            "cache_control": {
+                "type": "ephemeral",
+                "ttl": get_settings().anthropic_cache_ttl,
+            },
         }
     ]
     dinamico: list[str] = [_contexto_temporal()]

@@ -87,3 +87,34 @@ def test_lo_cotidiano_va_en_haiku_y_las_citas_en_sonnet():
     ajustes = Settings(anthropic_api_key="test")
     assert "haiku" in ajustes.anthropic_model
     assert "sonnet" in ajustes.anthropic_model_agenda
+
+
+def test_el_system_prompt_pasa_el_minimo_cacheable_de_haiku():
+    """Haiku 4.5 no cachea nada por debajo de 4.096 tokens.
+
+    Si alguien recorta las FAQs y el prompt baja de ahí, la API no avisa:
+    simplemente deja de cachear y la factura sube sin que nadie lo note.
+    """
+    from sidhe_agent.main import RUTA_SYSTEM_PROMPT
+
+    texto = RUTA_SYSTEM_PROMPT.read_text(encoding="utf-8")
+    # ~3,5 caracteres por token en español; se pide margen sobre el mínimo
+    assert len(texto) / 3.5 > 4096 * 1.2
+
+
+def test_el_bloque_cacheado_no_lleva_nada_que_cambie():
+    """Lo que se cachea tiene que ser byte a byte igual entre mensajes.
+
+    La hora con minutos vive en el bloque dinámico, DESPUÉS del corte. Si
+    se colara en el bloque cacheado, el prompt cambiaría cada minuto y no
+    habría un solo acierto de caché.
+    """
+    from sidhe_agent.graph.nodes import _bloques_system
+
+    bloques = _bloques_system("PROMPT ESTATICO", {"perfil": {"nombre": "Ana"}})
+    cacheados = [b for b in bloques if b.get("cache_control")]
+
+    assert len(cacheados) == 1
+    assert cacheados[0]["text"] == "PROMPT ESTATICO"
+    assert cacheados[0] is bloques[0], "el corte va antes de lo dinámico"
+    assert "Ana" not in cacheados[0]["text"]

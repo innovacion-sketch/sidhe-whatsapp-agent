@@ -84,6 +84,14 @@ class Settings(BaseSettings):
     # grande se lleva casi un tercio del gasto sin mejorar la respuesta.
     anthropic_model_utilitario: str = "claude-haiku-4-5"
 
+    # Cuánto vive el caché de prompt de Anthropic. "5m" es el default de la
+    # API y es corto para WhatsApp: el cliente tarda minutos en contestar y
+    # para entonces el prompt ya caducó, así que cada mensaje se vuelve a
+    # escribir a 1.25x en vez de leerse a 0.1x. "1h" cuesta 2x escribir y
+    # conviene en cuanto una conversación pasa del par de mensajes; se
+    # decide con datos, no a ojo (scripts/tasa_cache.py).
+    anthropic_cache_ttl: str = "5m"
+
     # Caché de respuestas de catálogo (ver services/cache_respuestas.py).
     # Apagarlo es poner CACHE_RESPUESTAS_ACTIVO=false y desplegar.
     cache_respuestas_activo: bool = True

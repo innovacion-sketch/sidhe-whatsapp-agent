@@ -105,6 +105,12 @@ def crear_llm(settings: Any, modelo: str) -> ChatAnthropic:
     con error 400. Sin razonamiento extendido: en Sonnet 5 viene encendido
     por defecto y esas respuestas se cobran como salida, cuando hoy el bot
     contesta bien sin él. Si algún día se quiere, se cambia aquí.
+
+    Sin punto de corte de caché en el historial, aunque la API lo permita:
+    el bloque dinámico del system prompt lleva la hora con minutos, así que
+    todo lo que va después cambia cada minuto y un corte ahí escribiría un
+    caché que nunca se lee. Primero hay que sacar el reloj de ahí; mientras,
+    el único corte vive en el system prompt (graph/nodes.py).
     """
     return ChatAnthropic(
         model=modelo,
