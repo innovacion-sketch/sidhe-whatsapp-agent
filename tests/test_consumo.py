@@ -162,3 +162,56 @@ def test_una_respuesta_sin_uso_no_se_cuenta():
 
     assert uso_de_respuesta(AIMessage(content="hola")) is None
     assert uso_de_respuesta(None) is None
+
+
+def test_se_cuentan_los_tokens_escritos_aunque_vengan_por_ttl():
+    """Escribir caché cuesta 1.25x y no se estaba viendo.
+
+    Cuando la respuesta dice de qué TTL fue el caché, LangChain pone los
+    tokens en 'ephemeral_5m_input_tokens' y deja 'cache_creation' en cero
+    para no contarlos dos veces. Leyendo solo la clave genérica, lo escrito
+    salía siempre 0 y el costo del panel quedaba corto.
+    """
+    from types import SimpleNamespace
+
+    from sidhe_agent.services.consumo import uso_de_respuesta
+
+    respuesta = SimpleNamespace(
+        usage_metadata={
+            "input_tokens": 9000,
+            "output_tokens": 120,
+            "input_token_details": {
+                "cache_read": 2000,
+                "cache_creation": 0,
+                "ephemeral_5m_input_tokens": 6000,
+                "ephemeral_1h_input_tokens": 0,
+            },
+        },
+        response_metadata={"model": "claude-haiku-4-5"},
+    )
+
+    modelo, tokens = uso_de_respuesta(respuesta)
+
+    assert modelo == "claude-haiku-4-5"
+    assert tokens["cache_lectura"] == 2000
+    assert tokens["cache_escritura"] == 6000
+
+
+def test_la_clave_generica_sigue_sirviendo():
+    """No todas las respuestas traen el desglose por TTL."""
+    from types import SimpleNamespace
+
+    from sidhe_agent.services.consumo import uso_de_respuesta
+
+    respuesta = SimpleNamespace(
+        usage_metadata={
+            "input_tokens": 5000,
+            "output_tokens": 50,
+            "input_token_details": {"cache_read": 0, "cache_creation": 4800},
+        },
+        response_metadata={"model": "claude-sonnet-5"},
+    )
+
+    _, tokens = uso_de_respuesta(respuesta)
+
+    assert tokens["cache_escritura"] == 4800

@@ -73,3 +73,40 @@ def test_una_charla_vieja_de_citas_no_marca_para_siempre():
 def test_sin_mensajes_no_revienta():
     assert not es_conversacion_de_cita({})
     assert not es_conversacion_de_cita({"messages": None})
+
+
+def test_el_bot_no_se_marca_a_si_mismo_con_sus_propias_palabras():
+    """Lo que dejó la carga en Sonnet después de pasarla a Haiku.
+
+    Casi toda respuesta de precios nombra "la valoración" y "el estudio de
+    pisada". Contando esas palabras como intención de agendar, una simple
+    pregunta de precio mandaba los ocho mensajes siguientes al modelo caro.
+    """
+    conversacion = estado(
+        HumanMessage(content="¿cuánto cuestan las plantillas?"),
+        AIMessage(content="La valoración del estudio de pisada no tiene costo."),
+        HumanMessage(content="¿y hacen envíos?"),
+    )
+    assert not es_conversacion_de_cita(conversacion)
+
+
+def test_si_el_bot_acaba_de_ofrecer_agendar_el_si_cuenta():
+    """'Sí' no dice nada por sí solo; lo dice la pregunta que contesta."""
+    conversacion = estado(
+        HumanMessage(content="¿cuánto cuestan?"),
+        AIMessage(content="Cuestan $2,199. ¿Quieres que te agende una cita?"),
+        HumanMessage(content="sí"),
+    )
+    assert es_conversacion_de_cita(conversacion)
+
+
+def test_preguntar_por_una_sucursal_no_es_agendar():
+    """La pregunta más común que hay: no tiene por qué pagar el modelo caro."""
+    conversacion = estado(
+        HumanMessage(content="¿dónde se ubican?"),
+        AIMessage(content=""),
+        ToolMessage(content="[]", tool_call_id="1", name="buscar_sucursal"),
+        AIMessage(content="Estamos en Liverpool Polanco."),
+        HumanMessage(content="¿a qué hora abren?"),
+    )
+    assert not es_conversacion_de_cita(conversacion)

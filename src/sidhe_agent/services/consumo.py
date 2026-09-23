@@ -114,11 +114,21 @@ def uso_de_respuesta(mensaje: Any) -> tuple[str, dict] | None:
     meta = getattr(mensaje, "response_metadata", None) or {}
     modelo = meta.get("model") or meta.get("model_name") or "desconocido"
     detalle = uso.get("input_token_details") or {}
+    # Cuando la respuesta dice de qué TTL fue el caché, LangChain pone los
+    # tokens en su clave ("ephemeral_5m_input_tokens") y deja `cache_creation`
+    # en cero para no contarlos dos veces. Leyendo solo la clave genérica,
+    # lo escrito siempre salía 0 y el costo quedaba corto: escribir caché
+    # cuesta 1.25x, y era justo lo que no se estaba viendo.
+    escritura = detalle.get("cache_creation") or 0
+    por_ttl = sum(
+        detalle.get(clave) or 0
+        for clave in ("ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens")
+    )
     return modelo, {
         "entrada": uso.get("input_tokens") or 0,
         "salida": uso.get("output_tokens") or 0,
         "cache_lectura": detalle.get("cache_read") or 0,
-        "cache_escritura": detalle.get("cache_creation") or 0,
+        "cache_escritura": por_ttl or escritura,
     }
 
 

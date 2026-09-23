@@ -138,15 +138,25 @@ PALABRAS_DE_AGENDA = re.compile(
     r"\b(agend|cita|reagend|cancel|disponib|estudio de pisada|valoraci)",
     re.IGNORECASE,
 )
-# Si el hilo ya tocó una de estas, sigue en manos del modelo grande
+# Lo único que se le cuenta al bot: haber OFRECIDO la cita. Nombrar "la
+# valoración" o "el estudio de pisada" lo hace en cada respuesta de precios
+# y no significa que nadie quiera agendar nada.
+PROPUESTA_DE_AGENDA = re.compile(
+    r"(te agend|agendarte|quieres agendar|gustar[ií]a agendar|agendamos|"
+    r"te aparto|quieres una cita|buscamos un horario|qu[eé] d[ií]a te)",
+    re.IGNORECASE,
+)
+# Si el hilo ya tocó una de estas, sigue en manos del modelo grande.
+# Sin buscar_sucursal ni listar_zonas: "¿dónde se ubican?" es la pregunta
+# más común que hay y no es agendar. Tenerlas aquí mandaba al modelo caro
+# los ocho mensajes siguientes a cada consulta de sucursal, que es casi
+# toda la conversación.
 TOOLS_DE_AGENDA = frozenset(
     {
         "consultar_disponibilidad",
         "agendar_cita",
         "cancelar_cita",
         "consultar_mis_citas",
-        "buscar_sucursal",
-        "listar_zonas",
         "presentar_opciones",
     }
 )
@@ -163,14 +173,32 @@ def es_conversacion_de_cita(state: AgentState) -> bool:
 
     La decisión es determinista a propósito: preguntarle a un modelo "¿esto
     es una cita?" costaría otra llamada y anularía el ahorro.
+
+    Las palabras solo cuentan si las dijo el CLIENTE, con una excepción: lo
+    último que dijo el bot. El bot nombra "la valoración" y "el estudio de
+    pisada" en casi toda respuesta de precios, así que mirando todo lo suyo
+    se marcaba a sí mismo —bastaba una pregunta de precio para que los ocho
+    mensajes siguientes se fueran al modelo caro, y eso dejó la carga en
+    Sonnet después de pasarla a Haiku—. Pero su último mensaje sí importa:
+    si acaba de ofrecer agendar, el "sí" del cliente es parte del flujo
+    aunque no diga ninguna palabra de agenda.
     """
     if state.get("ui_pendiente"):
         # Hay botones esperando: la respuesta del cliente es parte del flujo
         return True
     mensajes = state.get("messages", []) or []
+    ultima_del_bot = next(
+        (m for m in reversed(mensajes) if type(m).__name__ == "AIMessage"), None
+    )
+    if ultima_del_bot is not None:
+        texto = getattr(ultima_del_bot, "content", "")
+        if isinstance(texto, str) and PROPUESTA_DE_AGENDA.search(texto):
+            return True
     for mensaje in reversed(mensajes[-VENTANA_DE_AGENDA:]):
         if getattr(mensaje, "name", None) in TOOLS_DE_AGENDA:
             return True
+        if type(mensaje).__name__ != "HumanMessage":
+            continue
         contenido = getattr(mensaje, "content", "")
         if isinstance(contenido, str) and PALABRAS_DE_AGENDA.search(contenido):
             return True
