@@ -41,6 +41,33 @@ def horas_del_dia(
     return bloques
 
 
+def hay_turno_que_cubra(
+    turnos_del_dia: list[tuple], inicio: datetime.time, fin: datetime.time
+) -> bool:
+    """Si algún turno cubre el bloque COMPLETO, de principio a fin.
+
+    De punta a punta a propósito: una cita de 16:30 con el turno terminando
+    a las 17:00 deja al cliente a medias.
+    """
+    return any(
+        entrada <= inicio and fin <= salida for entrada, salida in turnos_del_dia
+    )
+
+
+def horas_ofrecibles(
+    bloques: list[tuple], turnos_del_dia: list[tuple] | None
+) -> list[tuple]:
+    """Los bloques que alguien puede atender ese día.
+
+    `turnos_del_dia` en None o vacío significa que esa semana todavía no se
+    carga en el rol: entonces se ofrece el horario completo de la tienda,
+    igual que siempre. Recortar por falta de datos vaciaría la agenda.
+    """
+    if not turnos_del_dia:
+        return bloques
+    return [b for b in bloques if hay_turno_que_cubra(turnos_del_dia, b[0], b[1])]
+
+
 def slots_faltantes(
     *,
     sucursal_id: int,
@@ -50,6 +77,7 @@ def slots_faltantes(
     fechas: list[datetime.date],
     existentes: set[tuple[datetime.date, datetime.time]],
     minutos: int,
+    turnos: dict[datetime.date, list[tuple]] | None = None,
 ) -> list[dict]:
     """Los horarios que deberían existir en esas fechas y todavía no existen.
 
@@ -63,7 +91,8 @@ def slots_faltantes(
     for fecha in fechas:
         if DIAS_SEMANA[fecha.weekday()] not in abiertos:
             continue
-        for hora_inicio, hora_fin in bloques:
+        del_dia = horas_ofrecibles(bloques, (turnos or {}).get(fecha))
+        for hora_inicio, hora_fin in del_dia:
             if (fecha, hora_inicio) in existentes:
                 continue
             nuevos.append({
@@ -109,8 +138,11 @@ async def asegurar_slots(dias: int, minutos: int = 60) -> int:
     # asistencias configurado o si no se pudo consultar: entonces se agenda
     # como siempre, que es mejor que quedarse sin citas por falta de datos.
     sin_personal = await asistencias.dias_sin_personal(hoy, fechas[-1])
+    # Turnos programados: solo se ofrecen horas que alguien pueda atender.
+    # None = no se pudo consultar, y entonces se ofrece todo como siempre.
+    turnos = await asistencias.turnos(hoy, fechas[-1])
 
-    creados = borrados = 0
+    creados = borrados = fuera_de_turno = 0
     async with get_session() as session:
         sucursales = (
             await session.execute(select(Sucursal).where(Sucursal.activa.is_(True)))
@@ -119,14 +151,20 @@ async def asegurar_slots(dias: int, minutos: int = 60) -> int:
         for sucursal in sucursales:
             # Solo lo de hoy en adelante: la historia de slots crece sin fin
             # y no hace falta leerla para saber qué falta.
-            existentes = set(
-                (
-                    await session.execute(
-                        select(Slot.fecha, Slot.hora_inicio).where(
-                            Slot.sucursal_id == sucursal.id, Slot.fecha >= hoy
-                        )
-                    )
-                ).all()
+            filas_slots = (
+                await session.execute(
+                    select(
+                        Slot.id, Slot.fecha, Slot.hora_inicio, Slot.hora_fin
+                    ).where(Slot.sucursal_id == sucursal.id, Slot.fecha >= hoy)
+                )
+            ).all()
+            existentes = {(fecha, hora) for _, fecha, hora, _ in filas_slots}
+            # Turnos de ESTA sucursal por fecha. Una fecha sin turnos = esa
+            # semana no se ha cargado: se ofrece el horario completo.
+            turnos_sucursal = (
+                None
+                if turnos is None
+                else {f: turnos.get((sucursal.nombre, f), []) for f in fechas}
             )
             nuevos = slots_faltantes(
                 sucursal_id=sucursal.id,
@@ -136,6 +174,7 @@ async def asegurar_slots(dias: int, minutos: int = 60) -> int:
                 fechas=[f for f in fechas if (sucursal.nombre, f) not in sin_personal],
                 existentes=existentes,
                 minutos=minutos,
+                turnos=turnos_sucursal,
             )
             session.add_all(Slot(**n) for n in nuevos)
             creados += len(nuevos)
@@ -145,6 +184,30 @@ async def asegurar_slots(dias: int, minutos: int = 60) -> int:
             # antes del cambio. Se quitan los que nadie reservó; los que ya
             # tienen cita NO se tocan: esa cita hay que atenderla o reubicarla
             # a mano, y para eso está la alerta por correo.
+            # Horarios que quedaron fuera del turno de ese día. Solo cuando
+            # hay rol cargado: sin rol no se recorta nada.
+            if turnos is not None:
+                sueltos = [
+                    slot_id
+                    for slot_id, fecha, h_ini, h_fin in filas_slots
+                    if turnos.get((sucursal.nombre, fecha))
+                    and not hay_turno_que_cubra(
+                        turnos[(sucursal.nombre, fecha)], h_ini, h_fin
+                    )
+                ]
+                if sueltos:
+                    fuera_de_turno += (
+                        await session.execute(
+                            delete(Slot).where(
+                                Slot.id.in_(sueltos),
+                                Slot.reservados == 0,
+                                ~select(Cita.id)
+                                .where(Cita.slot_id == Slot.id)
+                                .exists(),
+                            )
+                        )
+                    ).rowcount
+
             cerrados = dias_a_retirar(
                 sucursal.nombre, fechas, sin_personal, sucursal.dias_operacion
             )
@@ -163,8 +226,12 @@ async def asegurar_slots(dias: int, minutos: int = 60) -> int:
                 ).rowcount
 
         await session.commit()
-    if borrados:
-        logger.info("horarios_retirados_por_falta_de_personal", horarios=borrados)
+    if borrados or fuera_de_turno:
+        logger.info(
+            "horarios_retirados_por_falta_de_personal",
+            dias_cerrados=borrados,
+            fuera_de_turno=fuera_de_turno,
+        )
     return creados
 
 

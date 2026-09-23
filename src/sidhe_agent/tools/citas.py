@@ -23,6 +23,7 @@ from ..config import get_settings
 from ..db.models import Cita, Slot, Sucursal
 from ..db.session import get_session
 from ..services import asistencias
+from ..services.agenda import hay_turno_que_cubra
 from ..services.google_calendar import borrar_evento, crear_evento
 from ..services.n8n import avisar_cita
 
@@ -190,6 +191,24 @@ async def _agendar_cita(
                     ),
                     "alternativas": await _alternativas(session, slot),
                 }
+            # Y que el turno cubra esa hora: puede haber gente ese día pero
+            # no cuando empieza la cita.
+            if sucursal_del_slot is not None:
+                del_dia = await asistencias.turnos(slot.fecha, slot.fecha)
+                turnos_aqui = (del_dia or {}).get(
+                    (sucursal_del_slot.nombre, slot.fecha)
+                )
+                if turnos_aqui and not hay_turno_que_cubra(
+                    turnos_aqui, slot.hora_inicio, slot.hora_fin
+                ):
+                    return {
+                        "error": "sin_personal_a_esa_hora",
+                        "que_decir": (
+                            "a esa hora no hay quien lo atienda en esa "
+                            "sucursal; ofrécele otro horario"
+                        ),
+                        "alternativas": await _alternativas(session, slot),
+                    }
             slot.reservados += 1
             cita = Cita(
                 slot_id=slot.id,
