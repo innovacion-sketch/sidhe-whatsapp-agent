@@ -78,6 +78,11 @@ async def huecos(session, desde: datetime.datetime) -> list[datetime.timedelta]:
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Mide el caché de prompt")
     parser.add_argument("--dias", type=int, default=30)
+    parser.add_argument(
+        "--por-dia",
+        action="store_true",
+        help="Desglose diario con los tokens en crudo (para diagnosticar)",
+    )
     args = parser.parse_args()
 
     hoy = datetime.date.today()
@@ -89,6 +94,23 @@ async def main() -> None:
         gaps = await huecos(session, desde_dt)
 
     print(f"Últimos {args.dias} días\n")
+
+    if args.por_dia:
+        # Con esto se distingue lo que un porcentaje solo no dice: si un
+        # modelo no lee de caché porque el prompt cambia entre llamadas
+        # (escribe mucho y lee poco) o porque no llega al mínimo cacheable
+        # y no hay nada que cachear (no escribe ni lee).
+        print("DÍA A DÍA (tokens de entrada / leídos / escritos)")
+        for fila in sorted(uso, key=lambda f: (f.fecha, f.modelo)):
+            entrada = int(fila.entrada or 0)
+            leido = int(fila.cache_lectura or 0)
+            escrito = int(fila.cache_escritura or 0)
+            print(
+                f"  {fila.fecha}  {fila.modelo:26} {fila.llamadas:5} llam  "
+                f"{entrada:9,} / {leido:9,} / {escrito:8,}   "
+                f"{porcentaje(leido, entrada)}"
+            )
+        print()
 
     print("LO QUE SE LEE DE CACHÉ")
     if not uso:
