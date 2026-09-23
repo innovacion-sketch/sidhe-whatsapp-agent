@@ -60,10 +60,19 @@ async def main() -> None:
     parser.add_argument(
         "--ventana", type=int, default=60, help="días tras la cita para contar la compra"
     )
+    parser.add_argument(
+        "--madurez",
+        type=int,
+        default=14,
+        help="ignorar las citas de los últimos N días: aún pueden comprar",
+    )
     args = parser.parse_args()
 
     hoy = datetime.date.today()
     desde = hoy - datetime.timedelta(days=args.dias)
+    # Una cita de anteayer que todavía no compra no es una cita perdida:
+    # es una cita joven. Contarla hunde el porcentaje sin motivo.
+    corte = hoy - datetime.timedelta(days=args.madurez)
 
     async with get_session() as session:
         citas = (
@@ -71,7 +80,7 @@ async def main() -> None:
                 select(Cita, Slot, Sucursal)
                 .join(Slot, Cita.slot_id == Slot.id)
                 .join(Sucursal, Cita.sucursal_id == Sucursal.id)
-                .where(Slot.fecha >= desde, Slot.fecha <= hoy)
+                .where(Slot.fecha >= desde, Slot.fecha <= corte)
                 .order_by(Slot.fecha)
             )
         ).all()
@@ -111,7 +120,11 @@ async def main() -> None:
             sin_cruce += 1
 
     comparables = vendidas + sin_cruce
-    print(f"Citas de los últimos {args.dias} días: {len(citas)}")
+    print(
+        f"Citas ya ocurridas entre {desde} y {corte}: {len(citas)}\n"
+        f"(no entran las de los últimos {args.madurez} días: aún pueden comprar,"
+        " ni las agendadas a futuro)"
+    )
     print(f"  canceladas:            {canceladas}")
     print(f"  fuera del alcance de la hoja: {fuera_de_hoja}")
     print(f"  comparables:           {comparables}")
@@ -128,6 +141,12 @@ async def main() -> None:
     ):
         if total:
             print(f"  {nombre:36} {con:3}/{total:3}  {porcentaje(con, total)}")
+    if comparables < 100:
+        print(
+            f"\nSon {comparables} citas: alcanza para el total, no para comparar"
+            " sucursales entre si. Con 2 o 3 citas cada una, un 100% y un 0%"
+            " son la misma cosa."
+        )
 
     await dispose_engine()
 
