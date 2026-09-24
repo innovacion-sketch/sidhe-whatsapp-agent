@@ -107,7 +107,8 @@
   .etiqueta { font-size: 10px; padding: 1px 7px; border-radius: 999px;
               text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
   .et-canal { background: #24304a; color: #9dc0ff; }
-  .et-esperando_asesor { background: rgba(239, 68, 68, .2); color: var(--rojo-texto); }
+  .et-esperando_asesor, .et-sin_respuesta { background: rgba(239, 68, 68, .2);
+    color: var(--rojo-texto); }
   .et-atendida, .et-cerrada { background: rgba(34, 197, 94, .18); color: var(--verde-texto); }
   .et-bot { background: #262b36; color: var(--suave); }
 
@@ -471,10 +472,15 @@ function dibujarSerie(serie) {
 // Orden y aspecto de cada estado. Rojo = alguien espera respuesta humana.
 const ESTADOS = {
   esperando_asesor: { nombre: "Esperando asesor", punto: "rojo" },
+  // Escribio y no salio NADA, ni del bot ni de nadie. Antes estas caian en
+  // "Con el bot", en gris, y nadie las veia esperando.
+  sin_respuesta: { nombre: "Sin responder", punto: "rojo" },
   atendida: { nombre: "Atendida", punto: "verde" },
   cerrada: { nombre: "Cerrada", punto: "verde" },
   bot: { nombre: "Con el bot", punto: "gris" },
 };
+// Los dos estados en los que alguien esta esperando de verdad
+const URGENTES = ["esperando_asesor", "sin_respuesta"];
 let filtro = "";
 
 function hora(iso) {
@@ -496,7 +502,7 @@ function hace(iso) {
 
 function etiquetaEstado(c) {
   const e = ESTADOS[c.estado] || ESTADOS.bot;
-  const espera = c.estado === "esperando_asesor" && c.esperando_desde
+  const espera = URGENTES.indexOf(c.estado) >= 0 && c.esperando_desde
     ? " · " + hace(c.esperando_desde) : "";
   return '<span class="etiqueta et-' + esc(c.estado) + '">' + e.nombre + espera + '</span>';
 }
@@ -509,7 +515,7 @@ function pintarFiltros(conteos) {
     const valor = o[0], nombre = o[1], punto = o[2];
     const n = conteos ? (valor ? conteos[valor] : conteos.todas) : 0;
     const clases = "chip" + (filtro === valor ? " activo" : "") +
-      (valor === "esperando_asesor" ? " rojo" + (n ? " con-pendientes" : "") : "");
+      (URGENTES.indexOf(valor) >= 0 ? " rojo" + (n ? " con-pendientes" : "") : "");
     return '<button class="' + clases + '" role="tab" aria-selected="' + (filtro === valor) +
       '" data-filtro="' + valor + '">' +
       (punto ? '<span class="punto ' + punto + '"></span>' : "") +

@@ -28,10 +28,18 @@ VENTANA_LIBRE_HORAS = 24
 
 # Estado de atención de cada conversación, tal como lo ve el asesor
 ESPERANDO_ASESOR = "esperando_asesor"  # rojo: alguien espera respuesta humana
+SIN_RESPUESTA = "sin_respuesta"        # rojo: escribió y NADIE contestó, ni el bot
 ATENDIDA = "atendida"                  # verde: el asesor contestó y fue lo último
 CERRADA = "cerrada"                    # verde: se dio por resuelta
 CON_BOT = "bot"                        # sin color: el bot la lleva
-ESTADOS = (ESPERANDO_ASESOR, ATENDIDA, CERRADA, CON_BOT)
+ESTADOS = (ESPERANDO_ASESOR, SIN_RESPUESTA, ATENDIDA, CERRADA, CON_BOT)
+
+# A partir de cuántos minutos sin ninguna respuesta se considera abandonada.
+# El bot contesta en segundos: si pasó esto y no salió nada, algo se atoró.
+# Una clienta mandó sus datos de cita y estuvo dos horas y media esperando
+# mientras el panel la pintaba de gris, "con el bot", porque su escalamiento
+# ya figuraba como atendido. Sin este estado, ese caso no se ve.
+MINUTOS_SIN_RESPUESTA = 30
 
 # Se calcula el estado sobre las más recientes y luego se filtra; así un
 # cliente esperando no desaparece de "Esperando asesor" solo porque entraron
@@ -55,6 +63,58 @@ async def _pendientes(session) -> set[tuple[str, str]]:
         )
     ).all()
     return {(canal, user_id) for canal, user_id in filas}
+
+
+async def inicio_de_la_pausa(canal: str, user_id: str) -> datetime.datetime | None:
+    """Cuándo se escaló esta conversación por última vez.
+
+    Sirve de corte para saber qué se habló mientras el bot estaba callado.
+    Mira el escalamiento más reciente sin importar su estado, porque se
+    consulta justo después de darlo por atendido.
+    """
+    async with get_session() as session:
+        return (
+            await session.execute(
+                select(func.max(Escalamiento.creado_en)).where(
+                    Escalamiento.canal == canal, Escalamiento.user_id == user_id
+                )
+            )
+        ).scalar()
+
+
+# Cuántos mensajes de la pausa se le devuelven al bot. Una conversación que
+# un asesor llevó media hora no cabe entera y tampoco hace falta: lo que
+# importa es el final, que es donde quedaron las cosas.
+MAX_MENSAJES_DE_PAUSA = 20
+
+
+async def hablado_durante_la_pausa(
+    canal: str, user_id: str, desde: datetime.datetime
+) -> list[tuple[str, str]]:
+    """(dirección, texto) de lo que se dijo mientras el bot estaba en pausa.
+
+    Esos mensajes nunca pasaron por el grafo —el bot estaba callado—, así
+    que no existen en su memoria. Sin ellos, al devolverle la conversación
+    vuelve a preguntar lo que el cliente ya contestó.
+    """
+    async with get_session() as session:
+        filas = (
+            await session.execute(
+                select(Mensaje.direccion, Mensaje.contenido)
+                .where(
+                    Mensaje.canal == canal,
+                    Mensaje.user_id == user_id,
+                    Mensaje.creado_en >= desde,
+                )
+                .order_by(Mensaje.creado_en.desc())
+                .limit(MAX_MENSAJES_DE_PAUSA)
+            )
+        ).all()
+    return [
+        (direccion, contenido)
+        for direccion, contenido in reversed(filas)
+        if (contenido or "").strip()
+    ]
 
 
 async def bot_pausado(canal: str, user_id: str) -> bool:
@@ -90,12 +150,36 @@ async def tomar_control(canal: str, user_id: str, motivo: str = MOTIVO_PANEL) ->
         return True
 
 
+def _lleva_mucho_sin_respuesta(
+    ultimo_entrante: datetime.datetime | None,
+    ultimo_saliente: datetime.datetime | None,
+    ahora: datetime.datetime | None,
+) -> bool:
+    """El cliente habló y no salió nada en mucho rato.
+
+    Sin `ahora` no se decide: se prefiere no pintar de rojo antes que pintar
+    de rojo por una comparación que no se pudo hacer.
+    """
+    if ultimo_entrante is None or ahora is None:
+        return False
+    if ultimo_saliente is not None and ultimo_saliente >= ultimo_entrante:
+        return False
+    if ultimo_entrante.tzinfo is None or ahora.tzinfo is None:
+        ultimo_entrante = ultimo_entrante.replace(tzinfo=None)
+        ahora = ahora.replace(tzinfo=None)
+    return ahora - ultimo_entrante >= datetime.timedelta(
+        minutes=MINUTOS_SIN_RESPUESTA
+    )
+
+
 def calcular_estado(
     *,
     escalado_desde: datetime.datetime | None,
     ultimo_humano: datetime.datetime | None,
     ultimo_entrante: datetime.datetime | None,
     cerrada_en: datetime.datetime | None,
+    ultimo_saliente: datetime.datetime | None = None,
+    ahora: datetime.datetime | None = None,
 ) -> str:
     """Rojo significa "alguien te está esperando ahorita".
 
@@ -104,13 +188,17 @@ def calcular_estado(
     - Esperando asesor: el bot escaló y ningún humano ha contestado desde
       entonces, o el cliente volvió a escribir después del asesor.
     - Atendida: hay escalamiento y la última palabra la tiene el asesor.
-    - Con el bot: no hay escalamiento pendiente.
+    - Sin responder: el cliente escribió y no salió NADA, ni del bot ni de
+      nadie. No importa por qué se atoró; se ve igual.
+    - Con el bot: no hay escalamiento pendiente y el bot va contestando.
     """
     if cerrada_en is not None and (
         ultimo_entrante is None or cerrada_en >= ultimo_entrante
     ):
         return CERRADA
     if escalado_desde is None:
+        if _lleva_mucho_sin_respuesta(ultimo_entrante, ultimo_saliente, ahora):
+            return SIN_RESPUESTA
         return CON_BOT
     humano_al_dia = (
         ultimo_humano is not None
@@ -161,6 +249,13 @@ async def _estados(session, pares: list[tuple[str, str]]) -> dict:
         .where(de_estas, Mensaje.direccion == "in")
         .group_by(*clave)
     )
+    # Cualquier salida, del bot o de una persona: si no hay ninguna después
+    # del último mensaje del cliente, nadie le contestó.
+    salientes = await por_conversacion(
+        select(*clave, func.max(Mensaje.creado_en))
+        .where(de_estas, Mensaje.direccion == "out")
+        .group_by(*clave)
+    )
     cierres = await por_conversacion(
         select(
             CierreConversacion.canal,
@@ -172,18 +267,25 @@ async def _estados(session, pares: list[tuple[str, str]]) -> dict:
     )
 
     resultado = {}
+    ahora = _ahora()
     for par in pares:
         estado = calcular_estado(
             escalado_desde=escalados.get(par),
             ultimo_humano=humanos.get(par),
             ultimo_entrante=entrantes.get(par),
             cerrada_en=cierres.get(par),
+            ultimo_saliente=salientes.get(par),
+            ahora=ahora,
         )
-        desde = (
-            esperando_desde(escalados.get(par), humanos.get(par), entrantes.get(par))
-            if estado == ESPERANDO_ASESOR
-            else None
-        )
+        if estado == ESPERANDO_ASESOR:
+            desde = esperando_desde(
+                escalados.get(par), humanos.get(par), entrantes.get(par)
+            )
+        elif estado == SIN_RESPUESTA:
+            # Espera desde que escribio y nadie le contesto
+            desde = entrantes.get(par)
+        else:
+            desde = None
         resultado[par] = (estado, desde)
     return resultado
 

@@ -99,8 +99,8 @@ def test_los_conteos_no_dependen_del_filtro():
     resultado = conv.filtrar(todas, conv.CON_BOT, limite=50)
     assert [c["user_id"] for c in resultado["conversaciones"]] == ["c"]
     assert resultado["conteos"] == {
-        conv.ESPERANDO_ASESOR: 2, conv.ATENDIDA: 0, conv.CERRADA: 1,
-        conv.CON_BOT: 1, "todas": 4,
+        conv.ESPERANDO_ASESOR: 2, conv.SIN_RESPUESTA: 0, conv.ATENDIDA: 0,
+        conv.CERRADA: 1, conv.CON_BOT: 1, "todas": 4,
     }
 
 
@@ -323,3 +323,49 @@ def test_ninguna_migracion_guarda_datos_bancarios():
             assert not re.search(r"\d{16,18}", texto), f"/{atajo} parece traer una cuenta"
     atajos = [a for a, _ in _migracion("0005_respuestas_del_equipo.py").RESPUESTAS_EQUIPO]
     assert "envio" not in atajos
+
+
+# --- nadie le contesto ---
+
+def estado_con_salida(escalado=None, humano=None, entrante=None, saliente=None,
+                      cierre=None, ahora=None) -> str:
+    return conv.calcular_estado(
+        escalado_desde=escalado, ultimo_humano=humano, ultimo_entrante=entrante,
+        cerrada_en=cierre, ultimo_saliente=saliente, ahora=ahora,
+    )
+
+
+def test_si_escribio_y_nadie_contesto_sale_en_rojo():
+    """El caso real: mando sus datos de cita y espero dos horas y media.
+
+    Su escalamiento ya figuraba como atendido, asi que el panel la pintaba
+    gris -"con el bot"- y nadie la vio esperando. El bot estaba callado
+    porque su hilo seguia interrumpido.
+    """
+    assert estado_con_salida(
+        entrante=t(0), saliente=t(-5), ahora=t(150)
+    ) == conv.SIN_RESPUESTA
+
+
+def test_el_bot_contestando_normal_no_se_pinta_de_rojo():
+    """Contesta en segundos: si hay salida posterior, todo en orden."""
+    assert estado_con_salida(
+        entrante=t(0), saliente=t(1), ahora=t(150)
+    ) == conv.CON_BOT
+
+
+def test_los_primeros_minutos_no_cuentan():
+    """El bot tarda segundos, pero no hay que pintar de rojo al instante."""
+    assert estado_con_salida(entrante=t(0), ahora=t(5)) == conv.CON_BOT
+    assert estado_con_salida(entrante=t(0), ahora=t(31)) == conv.SIN_RESPUESTA
+
+
+def test_una_conversacion_cerrada_no_reclama():
+    assert estado_con_salida(
+        entrante=t(0), cierre=t(10), ahora=t(150)
+    ) == conv.CERRADA
+
+
+def test_sin_la_hora_actual_no_se_inventa_el_rojo():
+    """Mejor no pintar que pintar por una comparacion que no se pudo hacer."""
+    assert estado_con_salida(entrante=t(0)) == conv.CON_BOT

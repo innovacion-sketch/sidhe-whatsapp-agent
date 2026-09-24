@@ -647,6 +647,11 @@ async def _devolver_al_agente(canal: str, user_id: str, nota: str) -> bool:
     niega a retomar el caso. Se agrega al hilo SIN invocar el grafo, para no
     enviarle un mensaje al cliente por nuestra cuenta. Devuelve True si había
     un hilo en pausa que reanudar.
+
+    Antes de la nota va lo que se habló durante la pausa. Esos mensajes
+    nunca pasaron por el grafo —el bot estaba callado— así que no existen
+    en su memoria: al devolverle la conversación volvía a preguntar lo que
+    el cliente ya le había contestado al asesor.
     """
     config = {"configurable": {"thread_id": f"{canal}:{user_id}"}}
     snapshot = await app.state.graph.aget_state(config)
@@ -655,9 +660,36 @@ async def _devolver_al_agente(canal: str, user_id: str, nota: str) -> bool:
         await app.state.graph.ainvoke(Command(resume="atendido"), config)
         reanudado = True
     await app.state.graph.aupdate_state(
-        config, {"messages": [HumanMessage(content=nota)], "escalado": False}
+        config,
+        {
+            "messages": [*await _contexto_de_la_pausa(canal, user_id),
+                         HumanMessage(content=nota)],
+            "escalado": False,
+        },
     )
     return reanudado
+
+
+async def _contexto_de_la_pausa(canal: str, user_id: str) -> list[Any]:
+    """Lo dicho mientras el bot callaba, como mensajes del hilo.
+
+    Lo del cliente entra como suyo; lo que mandó el asesor entra como del
+    bot, que es como tiene que leerlo para no repetirlo ni contradecirlo.
+    Si algo falla se devuelve vacío: mejor un bot sin contexto que una
+    conversación que no se puede devolver.
+    """
+    try:
+        desde = await conversaciones.inicio_de_la_pausa(canal, user_id)
+        if desde is None:
+            return []
+        hablado = await conversaciones.hablado_durante_la_pausa(canal, user_id, desde)
+    except Exception:
+        logger.exception("no_se_pudo_recuperar_el_contexto_de_la_pausa")
+        return []
+    return [
+        HumanMessage(content=texto) if direccion == "in" else AIMessage(content=texto)
+        for direccion, texto in hablado
+    ]
 
 
 @app.post("/internal/escalamientos/resolver")
