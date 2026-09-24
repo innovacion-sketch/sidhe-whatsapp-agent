@@ -17,7 +17,8 @@ from sidhe_agent.services import horario_asesores as h
 from sidhe_agent.tools.escalamiento import instruccion_para_el_cliente
 
 MX = ZoneInfo("America/Mexico_City")
-LUN_A_SAB = "lunes|martes|miercoles|jueves|viernes|sabado"
+# El horario real del equipo
+SIDHE = "lunes-viernes 10-18; sabado-domingo 10-13"
 
 
 def en(dia: int, hora: int, minuto: int = 0) -> datetime.datetime:
@@ -25,38 +26,90 @@ def en(dia: int, hora: int, minuto: int = 0) -> datetime.datetime:
     return datetime.datetime(2026, 9, 21 + dia, hora, minuto, tzinfo=MX)
 
 
-# --- horario ---
+# --- leer el horario ---
 
-def test_dentro_del_horario():
-    assert h.en_horario(en(1, 12), 10, 19, LUN_A_SAB)
-
-
-def test_fuera_por_la_hora_y_por_el_dia():
-    assert not h.en_horario(en(1, 9, 59), 10, 19, LUN_A_SAB)
-    assert not h.en_horario(en(1, 19), 10, 19, LUN_A_SAB)
-    assert not h.en_horario(en(6, 12), 10, 19, LUN_A_SAB)  # domingo
+def test_se_lee_como_se_diria():
+    horario = h.leer_horario(SIDHE)
+    assert horario[0] == (datetime.time(10), datetime.time(18))  # lunes
+    assert horario[4] == (datetime.time(10), datetime.time(18))  # viernes
+    assert horario[5] == (datetime.time(10), datetime.time(13))  # sabado
+    assert horario[6] == (datetime.time(10), datetime.time(13))  # domingo
 
 
-def test_de_noche_contestan_manana():
-    assert h.cuando_contestan(en(1, 23), 10, 19, LUN_A_SAB) == "mañana a partir de las 10:00"
+def test_acepta_dias_sueltos_minutos_y_acentos():
+    horario = h.leer_horario("miércoles,sábado 9:30-14")
+    assert set(horario) == {2, 5}
+    assert horario[2][0] == datetime.time(9, 30)
+
+
+def test_un_horario_mal_escrito_no_arranca():
+    """Leerlo mal haria que el bot le diga a los clientes una hora falsa."""
+    for malo in ["lunes 18-10", "lunes-jueves", "lunez 10-18", "10-18"]:
+        with pytest.raises(ValueError):
+            h.leer_horario(malo)
+
+
+# --- en horario ---
+
+def test_entre_semana_hasta_las_6():
+    assert h.en_horario(en(1, 17, 59), SIDHE)
+    assert not h.en_horario(en(1, 18), SIDHE)
+    assert not h.en_horario(en(1, 9, 59), SIDHE)
+
+
+def test_fin_de_semana_solo_hasta_la_1():
+    assert h.en_horario(en(5, 12, 30), SIDHE)
+    assert not h.en_horario(en(5, 13), SIDHE)
+    assert not h.en_horario(en(6, 15), SIDHE)
+
+
+# --- cuando contestan ---
+
+def test_entre_semana_de_noche_contestan_manana():
+    assert h.cuando_contestan(en(1, 23), SIDHE) == "mañana a partir de las 10:00"
 
 
 def test_de_madrugada_contestan_hoy():
-    assert h.cuando_contestan(en(1, 3), 10, 19, LUN_A_SAB) == "hoy a partir de las 10:00"
+    assert h.cuando_contestan(en(1, 3), SIDHE) == "hoy a partir de las 10:00"
 
 
-def test_el_sabado_en_la_noche_contestan_el_lunes():
-    """Domingo no hay: decir "mañana" sería volver a prometer de más."""
-    assert h.cuando_contestan(en(5, 22), 10, 19, LUN_A_SAB) == "el lunes a partir de las 10:00"
+def test_el_sabado_en_la_tarde_contestan_el_domingo():
+    """A las 3 del sabado ya no hay nadie, pero el domingo si abren."""
+    assert h.cuando_contestan(en(5, 15), SIDHE) == "mañana a partir de las 10:00"
+
+
+def test_el_domingo_en_la_tarde_contestan_el_lunes():
+    assert h.cuando_contestan(en(6, 14), SIDHE) == "mañana a partir de las 10:00"
 
 
 def test_en_horario_no_hay_cuando():
-    assert h.cuando_contestan(en(2, 12), 10, 19, LUN_A_SAB) == ""
+    assert h.cuando_contestan(en(2, 12), SIDHE) == ""
 
 
 def test_el_horario_se_dice_como_lo_diria_una_persona():
-    assert h.horario_legible(10, 19, LUN_A_SAB) == "de lunes a sábado de 10:00 a 19:00"
-    assert h.horario_legible(9, 18, "") == "todos los días de 9:00 a 18:00"
+    assert h.horario_legible(SIDHE) == (
+        "de lunes a viernes de 10:00 a 18:00, y sábados y domingos de 10:00 a 13:00"
+    )
+    assert h.horario_legible("sabado 10-14") == "los sábados de 10:00 a 14:00"
+
+
+# --- horas de atencion para reactivar al bot ---
+
+def test_de_noche_no_corren_las_horas():
+    """Viernes 5:55 pm → sabado 10 am: solo cinco minutos en que habia alguien."""
+    horas = h.horas_habiles_entre(en(4, 17, 55), en(5, 10), SIDHE)
+    assert abs(horas - 5 / 60) < 1e-6
+
+
+def test_el_fin_de_semana_corto_cuenta_lo_que_es():
+    """Sabado 12 → lunes 11: 1 h del sabado + 3 del domingo + 1 del lunes."""
+    assert h.horas_habiles_entre(en(5, 12), en(7, 11), SIDHE) == pytest.approx(5.0)
+
+
+def test_la_base_guarda_en_utc_y_se_cuenta_en_hora_de_mexico():
+    """Sin convertir, las 10 de la manana serian las 4 de la madrugada."""
+    desde_utc = en(1, 10).astimezone(datetime.timezone.utc)
+    assert h.horas_habiles_entre(desde_utc, en(1, 14), SIDHE) == pytest.approx(4.0)
 
 
 # --- la promesa del escalamiento ---

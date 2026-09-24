@@ -137,16 +137,16 @@ class Settings(BaseSettings):
     espera_rafaga_segundos: float = 4.0
     espera_rafaga_maximo_segundos: float = 15.0
 
-    # Cuándo hay asesores para contestar un escalamiento. Fuera de este
-    # horario el bot ya no promete "pronto": dice cuándo le contestan y
-    # ofrece el teléfono de la sucursal (services/horario_asesores.py).
-    # Días separados por | (lunes|martes|...); vacío = todos los días.
-    asesores_hora_inicio: int = 10
-    asesores_hora_fin: int = 19
-    asesores_dias: str = "lunes|martes|miercoles|jueves|viernes|sabado"
+    # Cuándo hay asesores para contestar un escalamiento, por día. Fuera de
+    # este horario el bot ya no promete "pronto": dice cuándo le contestan
+    # y ofrece el teléfono de la sucursal (services/horario_asesores.py).
+    # Reglas separadas por ";", días en rango o con coma, horas HH o HH:MM.
+    asesores_horario: str = "lunes-viernes 10-18; sabado-domingo 10-13"
 
     # Si nadie del equipo contesta un escalamiento en estas horas, el bot
     # retoma la conversación: un cliente en silencio es peor que un bot.
+    # Son horas DE ATENCIÓN (asesores_horario), no de reloj: de noche no
+    # corren, porque de noche nadie podía contestar.
     horas_reactivar_bot: int = 4
 
     # Google Calendar: credenciales de la cuenta de servicio. Acepta el JSON

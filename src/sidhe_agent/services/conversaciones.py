@@ -17,6 +17,7 @@ from sqlalchemy import func, or_, select, tuple_, update
 from ..config import get_settings
 from ..db.models import CierreConversacion, Escalamiento, Mensaje
 from ..db.session import get_session
+from . import horario_asesores
 
 MAX_CONVERSACIONES = 100
 MAX_MENSAJES = 200
@@ -544,8 +545,11 @@ async def revisar_pausa(canal: str, user_id: str, horas_limite: int) -> str:
         if fila is None:
             return ACTIVO
 
-        antiguedad = _ahora() - fila
-        if antiguedad < datetime.timedelta(hours=horas_limite):
+        # Horas en que PODÍA contestar alguien, no reloj corrido: si no, un
+        # escalamiento del viernes a las 5:55 se daba por abandonado a las
+        # 10 de la noche y el bot volvía disculpándose, justo después de
+        # decirle al cliente que le contestaban al día siguiente.
+        if horario_asesores.horas_habiles_entre(fila, _ahora()) < horas_limite:
             return PAUSADO
 
         await session.execute(

@@ -132,6 +132,10 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     configurar_logging(settings.log_level)
 
+    # Un horario de asesores mal escrito tiene que tronar el deploy, no la
+    # primera vez que alguien escala: el bot le diría al cliente una hora falsa
+    horario_asesores.leer_horario(settings.asesores_horario)
+
     app.state.stack = AsyncExitStack()
     saver = await app.state.stack.enter_async_context(
         AsyncPostgresSaver.from_conn_string(settings.psycopg_url)
