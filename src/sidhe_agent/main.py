@@ -44,6 +44,7 @@ from .services import (
     conversaciones,
     cortesias,
     google_sheets,
+    horario_asesores,
     metricas,
 )
 from .services import respuestas_rapidas
@@ -343,6 +344,45 @@ def _contenido_para_grafo(entrante: IncomingMessage, transcripcion: str | None) 
     return entrante.contenido
 
 
+def texto_acuse_pausa(momento: datetime.datetime) -> str:
+    """Lo que se le dice al cliente que escribe mientras espera a un asesor."""
+    cuando = horario_asesores.cuando_contestan(momento)
+    if not cuando:
+        return (
+            "Recibí tu mensaje y ya lo tiene un asesor. Te contesta por aquí "
+            "en cuanto se libere."
+        )
+    return (
+        "Recibí tu mensaje y ya lo tiene un asesor. Nuestro equipo atiende "
+        f"{horario_asesores.horario_legible()}, así que te contestamos {cuando}."
+    )
+
+
+async def _acusar_pausa(app: FastAPI, entrante: IncomingMessage, log) -> None:
+    """Un aviso, una sola vez, al que escribe durante una pausa.
+
+    Sin esto el cliente escribe "¿hola?" y no recibe nada. Nunca interrumpe
+    el paso: si falla, la pausa sigue igual que antes.
+    """
+    try:
+        if entrante.tipo == "texto" and cortesias.es_acuse(entrante.contenido):
+            return  # a un "gracias" no hace falta contestarle que esperamos
+        if not await conversaciones.toca_acusar_la_pausa(
+            entrante.canal, entrante.user_id
+        ):
+            return
+        texto = texto_acuse_pausa(horario_asesores.ahora_local())
+        adaptador = _adaptador(app, entrante.canal) or app.state.adapter
+        sid = await adaptador.send(entrante.user_id, OutgoingMessage(texto=texto))
+        await _guardar_mensaje(
+            "out", entrante.canal, entrante.user_id,
+            conversaciones.TIPO_ACUSE_PAUSA, texto, twilio_sid=sid,
+        )
+        log.info("pausa_acusada")
+    except Exception:
+        log.exception("error_acusando_la_pausa")
+
+
 _agrupador_de_rafagas: Agrupador | None = None
 
 
@@ -404,10 +444,12 @@ async def procesar_mensaje(app: FastAPI, entrante: IncomingMessage) -> None:
         snapshot = await app.state.graph.aget_state(config)
         if any(t.interrupts for t in snapshot.tasks):
             log.info("thread_escalado_bot_en_silencio")
+            await _acusar_pausa(app, entrante, log)
             return
         if estado_atencion == conversaciones.PAUSADO:
             # Una persona lleva la conversacion: el bot no opina.
             log.info("conversacion_atendida_por_humano")
+            await _acusar_pausa(app, entrante, log)
             return
 
         # Dos atajos que no necesitan al modelo, ambos solo cuando la

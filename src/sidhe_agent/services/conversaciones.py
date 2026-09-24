@@ -117,6 +117,38 @@ async def hablado_durante_la_pausa(
     ]
 
 
+# Tipo con que se guarda el aviso automático que se manda durante la pausa
+TIPO_ACUSE_PAUSA = "acuse_pausa"
+
+
+async def toca_acusar_la_pausa(canal: str, user_id: str) -> bool:
+    """Si al cliente que escribe durante una pausa hay que decirle algo.
+
+    Sí, una vez: sin aviso, el cliente escribe "¿hola?" y no recibe nada
+    (así esperó una clienta dos horas y media). Pero solo mientras nadie
+    del equipo haya escrito: si un asesor ya está en la conversación, un
+    mensaje automático en medio estorba.
+    """
+    desde = await inicio_de_la_pausa(canal, user_id)
+    if desde is None:
+        return False
+    async with get_session() as session:
+        ya = (
+            await session.execute(
+                select(Mensaje.id)
+                .where(
+                    Mensaje.canal == canal,
+                    Mensaje.user_id == user_id,
+                    Mensaje.direccion == "out",
+                    Mensaje.tipo.in_(("humano", TIPO_ACUSE_PAUSA)),
+                    Mensaje.creado_en >= desde,
+                )
+                .limit(1)
+            )
+        ).first()
+    return ya is None
+
+
 async def bot_pausado(canal: str, user_id: str) -> bool:
     """True si esta conversación la está atendiendo una persona."""
     async with get_session() as session:

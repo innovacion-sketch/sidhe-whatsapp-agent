@@ -137,6 +137,14 @@ class Settings(BaseSettings):
     espera_rafaga_segundos: float = 4.0
     espera_rafaga_maximo_segundos: float = 15.0
 
+    # Cuándo hay asesores para contestar un escalamiento. Fuera de este
+    # horario el bot ya no promete "pronto": dice cuándo le contestan y
+    # ofrece el teléfono de la sucursal (services/horario_asesores.py).
+    # Días separados por | (lunes|martes|...); vacío = todos los días.
+    asesores_hora_inicio: int = 10
+    asesores_hora_fin: int = 19
+    asesores_dias: str = "lunes|martes|miercoles|jueves|viernes|sabado"
+
     # Si nadie del equipo contesta un escalamiento en estas horas, el bot
     # retoma la conversación: un cliente en silencio es peor que un bot.
     horas_reactivar_bot: int = 4
