@@ -12,6 +12,8 @@ os.environ.setdefault(
 os.environ.setdefault("TWILIO_ACCOUNT_SID", "ACtest")
 os.environ.setdefault("TWILIO_AUTH_TOKEN", "token_de_prueba")
 os.environ.setdefault("TWILIO_VALIDATE_SIGNATURE", "false")
+# Sin espera de rafagas: los tests de webhooks revisan el despacho al momento
+os.environ.setdefault("ESPERA_RAFAGA_SEGUNDOS", "0")
 
 import pytest  # noqa: E402
 from sqlalchemy import text  # noqa: E402

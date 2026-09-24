@@ -130,6 +130,13 @@ class Settings(BaseSettings):
     # API interna (recordatorios vía n8n)
     internal_api_key: str = ""
 
+    # Segundos de silencio que se esperan antes de contestar un texto, por si
+    # el cliente manda otro enseguida (services/rafagas.py). 0 = contestar al
+    # instante, uno por uno. El tope evita que quien escribe sin parar espere
+    # de más.
+    espera_rafaga_segundos: float = 4.0
+    espera_rafaga_maximo_segundos: float = 15.0
+
     # Si nadie del equipo contesta un escalamiento en estas horas, el bot
     # retoma la conversación: un cliente en silencio es peor que un bot.
     horas_reactivar_bot: int = 4

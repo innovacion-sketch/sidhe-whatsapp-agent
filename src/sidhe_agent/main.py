@@ -48,6 +48,7 @@ from .services import (
 )
 from .services import respuestas_rapidas
 from .services.transcription import transcribir_audio
+from .services.rafagas import Agrupador
 from .services.twilio_content import enviar_recordatorio
 from .tools.citas import fecha_legible
 
@@ -338,6 +339,30 @@ def _contenido_para_grafo(entrante: IncomingMessage, transcripcion: str | None) 
     return entrante.contenido
 
 
+_agrupador_de_rafagas: Agrupador | None = None
+
+
+def _agrupador() -> Agrupador:
+    """Uno para todo el proceso: el candado solo sirve si es el mismo."""
+    global _agrupador_de_rafagas
+    if _agrupador_de_rafagas is None:
+        ajustes = get_settings()
+        _agrupador_de_rafagas = Agrupador(
+            espera=ajustes.espera_rafaga_segundos,
+            maximo=ajustes.espera_rafaga_maximo_segundos,
+        )
+    return _agrupador_de_rafagas
+
+
+async def _despachar(app: FastAPI, entrante: IncomingMessage) -> None:
+    """Entrada de todos los webhooks: junta la ráfaga y contesta en orden.
+
+    `procesar_mensaje` se busca al momento de llamar, no al definir, para
+    que los tests puedan sustituirlo.
+    """
+    await _agrupador().recibir(entrante, lambda e: procesar_mensaje(app, e))
+
+
 async def procesar_mensaje(app: FastAPI, entrante: IncomingMessage) -> None:
     log = logger.bind(
         user_id=enmascarar_user_id(entrante.user_id),
@@ -528,7 +553,7 @@ async def webhook_twilio_whatsapp(
         twilio_sid=entrante.message_sid,
         numero_negocio=entrante.numero_negocio,
     )
-    background_tasks.add_task(procesar_mensaje, request.app, entrante)
+    background_tasks.add_task(_despachar, request.app, entrante)
     return Response(content="<Response/>", media_type="application/xml")
 
 
@@ -994,7 +1019,7 @@ async def webhook_meta(
             item_id=entrante.item_id,
             twilio_sid=entrante.message_sid,
         )
-        background_tasks.add_task(procesar_mensaje, request.app, entrante)
+        background_tasks.add_task(_despachar, request.app, entrante)
 
     return Response(status_code=200)
 
