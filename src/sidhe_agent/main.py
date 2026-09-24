@@ -88,6 +88,10 @@ MENSAJE_ERROR_CLIENTE = (
     "Lo siento, tuve un problema técnico al procesar tu mensaje. "
     "¿Podrías intentarlo de nuevo en un momento?"
 )
+# Para lo que llegue vacío pese a todo (un tipo de mensaje que ningún canal
+# describe todavía). Mandarlo al modelo es un error seguro de la API y el
+# cliente acababa leyendo "problema técnico" por haber mandado una foto.
+MENSAJE_VACIO = "No alcancé a ver tu mensaje. ¿Me lo escribes, por favor?"
 
 
 def _cargar_system_prompt() -> str:
@@ -457,6 +461,17 @@ async def procesar_mensaje(app: FastAPI, entrante: IncomingMessage) -> None:
             log.info("audio_transcrito", caracteres=len(transcripcion))
 
         contenido = _contenido_para_grafo(entrante, transcripcion)
+        if not (contenido or "").strip():
+            log.warning("mensaje_vacio_contestado_sin_modelo")
+            adaptador = _adaptador(app, entrante.canal) or app.state.adapter
+            sid = await adaptador.send(
+                entrante.user_id, OutgoingMessage(texto=MENSAJE_VACIO)
+            )
+            await _guardar_mensaje(
+                "out", entrante.canal, entrante.user_id, "texto", MENSAJE_VACIO,
+                twilio_sid=sid,
+            )
+            return
         resultado = await app.state.graph.ainvoke(
             {
                 "messages": [HumanMessage(content=contenido)],

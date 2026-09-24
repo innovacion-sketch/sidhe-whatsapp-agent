@@ -19,6 +19,7 @@ import structlog
 from twilio.request_validator import RequestValidator
 from twilio.rest import Client
 
+from .adjuntos import describir_archivo, describir_ubicacion
 from .base import ChannelAdapter
 from .schemas import IncomingMessage, OutgoingMessage
 
@@ -103,6 +104,28 @@ class WhatsAppTwilioAdapter(ChannelAdapter):
                 contenido=payload.get("Body", ""),
                 media_url=payload.get("MediaUrl0"),
                 media_content_type=content_type,
+            )
+
+        # Foto, sticker, documento o video: se describe, porque el modelo no
+        # lo ve y un mensaje vacio lo rechaza la API.
+        if num_media > 0:
+            return IncomingMessage(
+                **comunes,
+                tipo="adjunto",
+                contenido=describir_archivo(content_type, payload.get("Body", "")),
+            )
+
+        # Ubicacion compartida: Twilio la manda sin media, en campos propios
+        if payload.get("Latitude"):
+            return IncomingMessage(
+                **comunes,
+                tipo="adjunto",
+                contenido=describir_ubicacion(
+                    payload.get("Latitude"),
+                    payload.get("Longitude"),
+                    payload.get("Address", ""),
+                    payload.get("Label", ""),
+                ),
             )
 
         return IncomingMessage(**comunes, tipo="texto", contenido=payload.get("Body", ""))

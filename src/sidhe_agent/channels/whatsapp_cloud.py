@@ -30,6 +30,7 @@ from typing import Any
 import httpx
 import structlog
 
+from .adjuntos import describir_archivo, describir_ubicacion
 from .base import ChannelAdapter
 from .schemas import (
     MAX_DESCRIPCION,
@@ -53,6 +54,14 @@ OBJETO_WHATSAPP = "whatsapp_business_account"
 # abre en 20. Se recorta aquí y no en el agente: es un límite del canal.
 MAX_CUERPO = 1024
 MAX_BOTON_LISTA = 20
+
+# Lo que Meta manda como archivo, y cómo se le nombra al agente
+ARCHIVOS = {
+    "image": "una imagen",
+    "sticker": "un sticker",
+    "document": "un documento",
+    "video": "un video",
+}
 
 # Dado un cliente, a qué número del negocio le escribió por última vez
 ResolverRemitente = Callable[[str], Awaitable[str | None]]
@@ -187,6 +196,42 @@ class WhatsAppCloudAdapter(ChannelAdapter):
                 tipo="audio",
                 media_url=audio.get("id"),
                 media_content_type=audio.get("mime_type") or "audio/ogg",
+            )
+
+        # Foto, sticker, documento o video: se describe, porque el modelo no
+        # lo ve y un mensaje vacio lo rechaza la API
+        if tipo in ARCHIVOS:
+            archivo = mensaje.get(tipo) or {}
+            return IncomingMessage(
+                **comunes,
+                tipo="adjunto",
+                contenido=describir_archivo(
+                    archivo.get("mime_type", ""),
+                    archivo.get("caption", ""),
+                    que=ARCHIVOS[tipo],
+                ),
+            )
+
+        if tipo == "location":
+            lugar = mensaje.get("location") or {}
+            return IncomingMessage(
+                **comunes,
+                tipo="adjunto",
+                contenido=describir_ubicacion(
+                    lugar.get("latitude"),
+                    lugar.get("longitude"),
+                    lugar.get("address", ""),
+                    lugar.get("name", ""),
+                ),
+            )
+
+        if tipo != "text":
+            # Contactos, reacciones, encuestas... lo que no sabemos leer se
+            # nombra en vez de llegar vacio
+            return IncomingMessage(
+                **comunes,
+                tipo="adjunto",
+                contenido=describir_archivo(que=f"un mensaje de tipo {tipo}"),
             )
 
         return IncomingMessage(

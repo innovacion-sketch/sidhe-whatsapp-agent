@@ -21,6 +21,7 @@ from typing import Any
 import httpx
 import structlog
 
+from .adjuntos import describir_archivo, describir_ubicacion
 from .base import ChannelAdapter
 from .schemas import IncomingMessage, OutgoingMessage
 
@@ -31,6 +32,9 @@ BASE_GRAPH = "https://graph.facebook.com"
 
 # El campo `object` del webhook dice de qué red viene
 OBJETO_A_CANAL = {"instagram": "instagram", "page": "messenger"}
+
+# Tipos de adjunto de Messenger/Instagram, como se le nombran al agente
+ARCHIVOS = {"image": "una imagen", "video": "un video", "file": "un documento"}
 
 MAX_QUICK_REPLIES = 13
 MAX_TITULO_QUICK_REPLY = 20
@@ -126,6 +130,28 @@ class MetaAdapter(ChannelAdapter):
                     media_content_type="audio/mp4",
                     message_sid=mensaje.get("mid"),
                 )
+
+        # Foto, video, archivo o ubicación: se describe, porque el modelo no
+        # lo ve y un mensaje vacío lo rechaza la API
+        for adjunto in mensaje.get("attachments") or []:
+            carga = adjunto.get("payload") or {}
+            if adjunto.get("type") == "location":
+                punto = carga.get("coordinates") or {}
+                contenido = describir_ubicacion(
+                    punto.get("lat"), punto.get("long"), nombre=adjunto.get("title", "")
+                )
+            else:
+                que = "un sticker" if carga.get("sticker_id") else ARCHIVOS.get(
+                    adjunto.get("type"), "un archivo"
+                )
+                contenido = describir_archivo(texto=mensaje.get("text", ""), que=que)
+            return IncomingMessage(
+                canal=self.canal,
+                user_id=remitente,
+                tipo="adjunto",
+                contenido=contenido,
+                message_sid=mensaje.get("mid"),
+            )
 
         return IncomingMessage(
             canal=self.canal,

@@ -11,7 +11,9 @@ from typing import Literal
 
 from pydantic import BaseModel, model_validator
 
-TipoMensaje = Literal["texto", "audio", "seleccion_interactiva"]
+# "adjunto": foto, sticker, documento, video o ubicación. El contenido es una
+# nota que describe lo que llegó (channels/adjuntos.py), nunca vacío.
+TipoMensaje = Literal["texto", "audio", "seleccion_interactiva", "adjunto"]
 
 MAX_TITULO = 24
 MAX_ETIQUETA = 24
