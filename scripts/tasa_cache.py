@@ -29,7 +29,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from sidhe_agent.config import get_settings
 from sidhe_agent.db.models import Mensaje, UsoModelo
@@ -92,6 +92,13 @@ async def main() -> None:
     async with get_session() as session:
         uso = await lecturas(session, desde)
         gaps = await huecos(session, desde_dt)
+        entrantes = (
+            await session.execute(
+                select(func.count())
+                .select_from(Mensaje)
+                .where(Mensaje.direccion == "in", Mensaje.creado_en >= desde_dt)
+            )
+        ).scalar() or 0
 
     print(f"Últimos {args.dias} días\n")
 
@@ -135,6 +142,20 @@ async def main() -> None:
             print("    ⚠ nada cacheado: el prompt no llega al mínimo del modelo")
     if total_entrada:
         print(f"  {'TOTAL':24} {porcentaje(total_leido, total_entrada)} de la entrada")
+
+    # De dónde sale el volumen: no es el tamaño del prompt, es cuántas veces
+    # se manda. Cada paso del agente reenvía la conversación entera, así que
+    # un mensaje que dispara cuatro pasos cuesta cuatro prompts completos.
+    llamadas_totales = sum(a[0] for a in por_modelo.values())
+    if entrantes and llamadas_totales:
+        print(
+            f"\n  {entrantes} mensajes de clientes → {llamadas_totales} llamadas "
+            f"al modelo ({llamadas_totales / entrantes:.1f} por mensaje)"
+        )
+        print(
+            f"  {total_entrada // max(llamadas_totales, 1):,} tokens de entrada "
+            "por llamada en promedio."
+        )
 
     print("\nSI EL CACHÉ ALCANZA A VIVIR")
     dentro_de_charla = [g for g in gaps if g <= CORTE_CONVERSACION]
