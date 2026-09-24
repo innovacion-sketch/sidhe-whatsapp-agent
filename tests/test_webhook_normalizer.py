@@ -55,8 +55,11 @@ def test_imagen_no_es_audio():
             "MediaUrl0": "https://api.twilio.com/media/ME456",
         }
     )
-    assert mensaje.tipo == "texto"
-    assert mensaje.contenido == "mira mi zapato"
+    # No es audio, y el pie de foto no se pierde: viaja con la nota que le
+    # dice al agente que hay una imagen que no puede ver
+    assert mensaje.tipo == "adjunto"
+    assert "mira mi zapato" in mensaje.contenido
+    assert mensaje.contenido.startswith("[el cliente envió una imagen]")
 
 
 def test_seleccion_de_lista():
