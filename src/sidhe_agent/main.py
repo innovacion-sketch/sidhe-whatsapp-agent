@@ -354,27 +354,32 @@ async def procesar_mensaje(app: FastAPI, entrante: IncomingMessage) -> None:
         # Thread pausado por escalamiento: el bot guarda silencio; los mensajes
         # del cliente los atiende el asesor humano hasta que el escalamiento se
         # resuelva vía /internal/escalamientos/resolver.
+        # El estado de atención se revisa ANTES que el interrupt, y no al
+        # revés. Un hilo escalado siempre tiene interrupt, así que cortando
+        # ahí primero nunca se llegaba a reactivar: la red de las cuatro
+        # horas quedaba muerta exactamente en el caso para el que se
+        # escribió, y la conversación se quedaba muda para siempre esperando
+        # que alguien la resolviera a mano. Pasó con un cliente que mandó sus
+        # datos de cita y nadie le contestó en horas.
+        estado_atencion = await conversaciones.revisar_pausa(
+            entrante.canal, entrante.user_id, get_settings().horas_reactivar_bot
+        )
+        if estado_atencion == conversaciones.REACTIVADO:
+            # Nadie contesto en horas: mejor un bot que un cliente en silencio.
+            # Con Command(resume=...), que es lo único que quita el interrupt;
+            # escribir el estado a secas dejaba el hilo pausado igual.
+            log.warning("escalamiento_abandonado_bot_retoma")
+            await _devolver_al_agente(
+                entrante.canal, entrante.user_id, NOTA_NADIE_ATENDIO
+            )
         snapshot = await app.state.graph.aget_state(config)
         if any(t.interrupts for t in snapshot.tasks):
             log.info("thread_escalado_bot_en_silencio")
             return
-        estado_atencion = await conversaciones.revisar_pausa(
-            entrante.canal, entrante.user_id, get_settings().horas_reactivar_bot
-        )
         if estado_atencion == conversaciones.PAUSADO:
             # Una persona lleva la conversacion: el bot no opina.
             log.info("conversacion_atendida_por_humano")
             return
-        if estado_atencion == conversaciones.REACTIVADO:
-            # Nadie contesto en horas: mejor un bot que un cliente en silencio.
-            log.warning("escalamiento_abandonado_bot_retoma")
-            await app.state.graph.aupdate_state(
-                config,
-                {
-                    "messages": [HumanMessage(content=NOTA_NADIE_ATENDIO)],
-                    "escalado": False,
-                },
-            )
 
         # Dos atajos que no necesitan al modelo, ambos solo cuando la
         # conversación no tiene nada abierto: un acuse suelto ("gracias") y
