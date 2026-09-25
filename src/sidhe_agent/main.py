@@ -106,6 +106,20 @@ def _cargar_system_prompt() -> str:
     return RUTA_SYSTEM_PROMPT.read_text(encoding="utf-8")
 
 
+def atiende_meta(numero_negocio: str | None) -> bool:
+    """Si ESTE número del negocio se atiende hoy por Meta y no por Twilio.
+
+    Mientras Twilio siga de socio en la cuenta, cada mensaje le llega a las
+    dos apps. Cada número se atiende por un solo lado —el que diga
+    WHATSAPP_CLOUD_NUMEROS— y el otro lo ignora. Pasar un número a Meta es
+    agregarlo a esa variable; regresarlo, quitarlo.
+    """
+    if not numero_negocio:
+        return False
+    en_meta = {whatsapp_cloud.clave_numero(n) for n in get_settings().whatsapp_cloud_mapa}
+    return whatsapp_cloud.clave_numero(numero_negocio) in en_meta
+
+
 def adaptador_whatsapp(settings: Any, twilio: Any) -> Any:
     """Twilio solo, o el enrutador Twilio/Meta si ya hay números en Meta."""
     mapa = settings.whatsapp_cloud_mapa
@@ -638,6 +652,13 @@ async def webhook_twilio_whatsapp(
 
     entrante = request.app.state.adapter.parse_incoming(form)
 
+    # Un número que ya se atiende por Meta lo recibe también Twilio mientras
+    # siga de socio en la cuenta: si se procesara aquí, el cliente recibiría
+    # la respuesta dos veces (una por cada lado, con ids distintos).
+    if atiende_meta(entrante.numero_negocio):
+        logger.info("mensaje_de_twilio_ignorado_lo_atiende_meta")
+        return Response(content="<Response/>", media_type="application/xml")
+
     # Twilio reintenta webhooks: idempotencia por MessageSid.
     if entrante.message_sid and await _mensaje_ya_procesado(entrante.message_sid):
         logger.info("webhook_duplicado_ignorado", twilio_sid=entrante.message_sid)
@@ -1103,6 +1124,11 @@ async def webhook_whatsapp_cloud(
     for parte in whatsapp_cloud.desglosar(payload):
         entrante = cloud.parse_incoming(parte)
         if not entrante.user_id:
+            continue
+        # La app está suscrita a toda la cuenta, así que llegan también los
+        # números que todavía atiende Twilio: esos se quedan de aquel lado
+        if not atiende_meta(entrante.numero_negocio):
+            logger.info("mensaje_de_meta_ignorado_lo_atiende_twilio")
             continue
         if entrante.message_sid and await _mensaje_ya_procesado(entrante.message_sid):
             logger.info("webhook_duplicado_ignorado", wamid=entrante.message_sid)

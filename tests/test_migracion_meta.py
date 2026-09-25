@@ -242,6 +242,8 @@ def _mensaje(texto="hola"):
 def cliente(monkeypatch):
     monkeypatch.setattr(get_settings(), "meta_app_secret", SECRETO, raising=False)
     monkeypatch.setattr(get_settings(), "meta_verify_token", "palabra", raising=False)
+    # El 0202 se atiende por Meta; el 5164 sigue por Twilio
+    monkeypatch.setattr(get_settings(), "whatsapp_cloud_numeros", f"{NUM_0202}=111", raising=False)
     cloud = WhatsAppCloudAdapter(phone_number_id="111", token="t")
     cloud.marcar_leido = AsyncMock()
     enrutador = WhatsAppEnrutador(object(), cloud, {NUM_0202}, AsyncMock(return_value=None))
@@ -306,3 +308,74 @@ def test_sin_numeros_en_meta_el_webhook_no_revienta(cliente, monkeypatch):
                     headers={"X-Hub-Signature-256": _firmar(cuerpo)})
     assert r.status_code == 200
     procesar.assert_not_awaited()
+
+
+# --- cada numero se atiende por un solo lado ---
+#
+# Mientras Twilio siga de socio en la cuenta, Meta le manda cada mensaje a
+# las dos apps. Twilio nos lo reenvia con su id y Meta con el suyo, asi que
+# no se detecta como repetido: sin esto el cliente recibe dos respuestas.
+
+def test_meta_ignora_los_numeros_que_sigue_atendiendo_twilio(cliente):
+    tc, _ = cliente
+    payload = _mensaje()
+    payload["entry"][0]["changes"][0]["value"]["metadata"]["display_phone_number"] = "5215638955164"
+    cuerpo = json.dumps(payload).encode()
+    with (
+        patch("sidhe_agent.main._mensaje_ya_procesado", AsyncMock(return_value=False)),
+        patch("sidhe_agent.main._guardar_mensaje", AsyncMock()) as guardar,
+        patch("sidhe_agent.main.procesar_mensaje", AsyncMock()) as procesar,
+    ):
+        tc.post("/webhooks/whatsapp/cloud", content=cuerpo,
+                headers={"X-Hub-Signature-256": _firmar(cuerpo)})
+    guardar.assert_not_awaited()
+    procesar.assert_not_awaited()
+
+
+def test_twilio_ignora_los_numeros_que_ya_atiende_meta(cliente, monkeypatch):
+    tc, _ = cliente
+    monkeypatch.setattr(get_settings(), "twilio_validate_signature", False, raising=False)
+    from sidhe_agent.channels.whatsapp_twilio import WhatsAppTwilioAdapter
+
+    monkeypatch.setattr(main.app.state, "adapter", WhatsAppTwilioAdapter(
+        account_sid="AC", auth_token="t", from_number=f"whatsapp:{NUM_5164}",
+    ), raising=False)
+    with (
+        patch("sidhe_agent.main._mensaje_ya_procesado", AsyncMock(return_value=False)),
+        patch("sidhe_agent.main._guardar_mensaje", AsyncMock()) as guardar,
+        patch("sidhe_agent.main.procesar_mensaje", AsyncMock()) as procesar,
+    ):
+        r = tc.post("/webhooks/twilio/whatsapp", data={
+            "From": "whatsapp:+5212283407867", "To": f"whatsapp:{NUM_0202}",
+            "MessageSid": "SM1", "Body": "hola",
+        })
+    assert r.status_code == 200
+    guardar.assert_not_awaited()
+    procesar.assert_not_awaited()
+
+
+def test_twilio_sigue_atendiendo_los_que_no_se_han_pasado(cliente, monkeypatch):
+    tc, _ = cliente
+    monkeypatch.setattr(get_settings(), "twilio_validate_signature", False, raising=False)
+    from sidhe_agent.channels.whatsapp_twilio import WhatsAppTwilioAdapter
+
+    monkeypatch.setattr(main.app.state, "adapter", WhatsAppTwilioAdapter(
+        account_sid="AC", auth_token="t", from_number=f"whatsapp:{NUM_5164}",
+    ), raising=False)
+    with (
+        patch("sidhe_agent.main._mensaje_ya_procesado", AsyncMock(return_value=False)),
+        patch("sidhe_agent.main._guardar_mensaje", AsyncMock()),
+        patch("sidhe_agent.main.procesar_mensaje", AsyncMock()) as procesar,
+    ):
+        tc.post("/webhooks/twilio/whatsapp", data={
+            "From": "whatsapp:+5212283407867", "To": f"whatsapp:{NUM_5164}",
+            "MessageSid": "SM2", "Body": "hola",
+        })
+    procesar.assert_awaited_once()
+
+
+def test_el_uno_de_mexico_tampoco_confunde_a_los_webhooks(monkeypatch):
+    monkeypatch.setattr(get_settings(), "whatsapp_cloud_numeros", "+525590630202=111", raising=False)
+    assert main.atiende_meta("+5215590630202")
+    assert not main.atiende_meta("+5215638955164")
+    assert not main.atiende_meta(None)
