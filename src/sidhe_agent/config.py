@@ -120,8 +120,10 @@ class Settings(BaseSettings):
     # El webhook usa META_APP_SECRET y META_VERIFY_TOKEN (la misma app).
     whatsapp_cloud_token: str = ""
     whatsapp_cloud_numeros: str = ""
-    # La plantilla de recordatorio, creada con scripts/migrar_a_meta.py
-    whatsapp_cloud_plantilla_recordatorio: str = "sidhe_recordatorio_cita"
+    # La plantilla de recordatorio, creada con scripts/migrar_a_meta.py. Otro
+    # nombre que la de Twilio ("sidhe_recordatorio_cita"), que ya existe en
+    # la WABA SIDHE GRAPHICS: con el mismo, Meta rechaza el alta.
+    whatsapp_cloud_plantilla_recordatorio: str = "sidhe_recordatorio_cita_botones"
     whatsapp_cloud_idioma_plantilla: str = "es_MX"
 
     # Transcripción de voz

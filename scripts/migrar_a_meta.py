@@ -129,6 +129,21 @@ async def revisar() -> None:
     print(f"  Verificación negocio:  {cuenta.get('business_verification_status', '?')}")
     print(f"  Moneda:                {cuenta.get('currency', '?')}")
 
+    # De quién es la cuenta y quién la paga: decide si hay que MOVER los
+    # números o basta con quitar a Twilio de en medio. Aparte, y sin
+    # reventar, porque no todas las cuentas exponen estos campos.
+    try:
+        duenos = await graph(
+            "GET", waba, fields="owner_business_info,on_behalf_of_business_info"
+        )
+        dueno = duenos.get("owner_business_info") or {}
+        a_nombre = duenos.get("on_behalf_of_business_info") or {}
+        print(f"  Dueño de la cuenta:     {dueno.get('name', '?')} ({dueno.get('id', '?')})")
+        if a_nombre:
+            print(f"  A nombre de:           {a_nombre.get('name', '?')} ({a_nombre.get('id', '?')})")
+    except SystemExit:
+        print("  Dueño de la cuenta:     (Meta no lo dejó ver con este token)")
+
     listo = (
         cuenta.get("account_review_status") == "APPROVED"
         and cuenta.get("business_verification_status") == "verified"
