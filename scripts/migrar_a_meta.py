@@ -16,6 +16,8 @@ humano tiene que hacer por fuerza:
 Uso, en este orden:
 
     python scripts/migrar_a_meta.py revisar
+    python scripts/migrar_a_meta.py suscribir-app
+    python scripts/migrar_a_meta.py crear-plantilla
     python scripts/migrar_a_meta.py soltar-de-twilio --numero +5215512340202
     python scripts/migrar_a_meta.py migrar          --numero +5215512340202
     python scripts/migrar_a_meta.py pedir-codigo    --numero +5215512340202
@@ -155,6 +157,17 @@ async def revisar() -> None:
             f"plataforma={numero.get('platform_type', '?')}"
         )
 
+    plantillas = (
+        await graph("GET", f"{waba}/message_templates", fields="name,status,language")
+    ).get("data", [])
+    buscada = get_settings().whatsapp_cloud_plantilla_recordatorio
+    print(f"\n  Plantilla de recordatorio ({buscada}):")
+    propias = [t for t in plantillas if t.get("name") == buscada]
+    if not propias:
+        print("    todavía no existe -> corre crear-plantilla")
+    for t in propias:
+        print(f"    {t.get('language')}: {t.get('status')}")
+
     print("\n" + "-" * 62)
     if not listo:
         print("ERROR: Todavía NO se puede migrar.")
@@ -167,6 +180,56 @@ async def revisar() -> None:
     print("\n  El método de pago NO se ve por API. Compruébalo a mano en")
     print("  business.facebook.com -> Configuración de WhatsApp -> Pagos.")
     print("  Sin tarjeta, la migración falla en el último paso.")
+
+
+# --- preparar la cuenta (no toca la linea) ---
+
+async def suscribir_app() -> None:
+    """Que los mensajes de esta WABA le lleguen a nuestra app.
+
+    Sin esto el número migra, contesta Meta, y el webhook nunca se entera:
+    el cliente escribe y nadie lo ve.
+    """
+    await graph("POST", f"{_waba()}/subscribed_apps")
+    print("\nOK. La app quedó suscrita a la WABA.")
+    print("  Falta configurar en la app de Meta -> WhatsApp -> Configuración:")
+    print("    URL:          https://TU-DOMINIO/webhooks/whatsapp/cloud")
+    print("    Verify token: el mismo de META_VERIFY_TOKEN")
+    print("    Campo:        messages")
+
+
+async def crear_plantilla() -> None:
+    """Da de alta la plantilla de recordatorio para que Meta la apruebe.
+
+    La de Twilio vive en la cuenta de Twilio y no viaja con el número. Esta
+    trae además la dirección y los botones Confirmo / Reagendar / Cancelar.
+    La aprobación de una plantilla de utilidad suele tardar de minutos a
+    un día: conviene pedirla ANTES de migrar, para no quedarse sin
+    recordatorios.
+    """
+    from sidhe_agent.channels.whatsapp_cloud import (
+        CUERPO_RECORDATORIO,
+        plantilla_recordatorio,
+    )
+
+    ajustes = get_settings()
+    nombre = ajustes.whatsapp_cloud_plantilla_recordatorio
+    idioma = ajustes.whatsapp_cloud_idioma_plantilla
+    print(f"\nPlantilla '{nombre}' ({idioma}):\n  {CUERPO_RECORDATORIO}")
+    print("  Botones: Confirmo asistencia · Reagendar · Cancelar cita")
+    confirmar("Se va a mandar a revisión de Meta.")
+    async with httpx.AsyncClient(timeout=TIMEOUT) as cliente:
+        respuesta = await cliente.post(
+            f"{GRAPH}/{_waba()}/message_templates",
+            headers={"Authorization": f"Bearer {_token()}"},
+            json=plantilla_recordatorio(nombre, idioma),
+        )
+    cuerpo = respuesta.json() if respuesta.content else {}
+    if respuesta.status_code >= 400:
+        error = (cuerpo.get("error") or {}).get("message", respuesta.text[:300])
+        salir(f"Meta no la aceptó ({respuesta.status_code}):\n  {error}")
+    print(f"\nOK. Estado: {cuerpo.get('status', '?')}")
+    print("  Corre 'revisar' en un rato para ver si ya quedó APPROVED.")
 
 
 # --- twilio ---
@@ -229,7 +292,7 @@ async def migrar(numero: str) -> None:
         migrate_phone_number="true",
     )
     print(f"\nOK: Aceptado. phone_number_id = {respuesta.get('id')}")
-    print("  Apúntalo: es lo que va en WHATSAPP_CLOUD_PHONE_ID.")
+    print("  Apúntalo: va en WHATSAPP_CLOUD_NUMEROS al terminar.")
     print("  Siguiente: pedir-codigo")
 
 
@@ -271,7 +334,8 @@ async def registrar(numero: str, pin: str) -> None:
     )
     print(f"\nOK: {numero} registrado en Cloud API. phone_number_id = {phone_id}")
     print("\n  Falta ponerlo en el entorno del bot y desplegar:")
-    print(f"    WHATSAPP_CLOUD_PHONE_ID={phone_id}")
+    print(f"    WHATSAPP_CLOUD_NUMEROS={numero}={phone_id}")
+    print("  Si ya hay otro número en Meta, van los dos separados con ;")
     print("\n  Y comprobar que el webhook de esta WABA apunta a")
     print("  https://TU-DOMINIO/webhooks/whatsapp/cloud")
 
@@ -281,6 +345,8 @@ def main() -> None:
     sub = parser.add_subparsers(dest="paso", required=True)
 
     sub.add_parser("revisar", help="Solo lee: dice si se puede migrar")
+    sub.add_parser("suscribir-app", help="Que los mensajes de la WABA lleguen al bot")
+    sub.add_parser("crear-plantilla", help="Manda a aprobar la plantilla de recordatorio")
 
     for nombre, ayuda in [
         ("soltar-de-twilio", "Borra el sender de Twilio (interrumpe el servicio)"),
@@ -302,6 +368,8 @@ def main() -> None:
 
     tareas = {
         "revisar": lambda: revisar(),
+        "suscribir-app": lambda: suscribir_app(),
+        "crear-plantilla": lambda: crear_plantilla(),
         "soltar-de-twilio": lambda: soltar_de_twilio(args.numero),
         "migrar": lambda: migrar(args.numero),
         "pedir-codigo": lambda: pedir_codigo(args.numero, args.metodo),

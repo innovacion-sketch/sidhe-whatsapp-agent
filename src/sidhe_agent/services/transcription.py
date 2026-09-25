@@ -66,10 +66,18 @@ async def _via_openai(datos: bytes, nombre: str) -> str:
     return resultado.text.strip()
 
 
-async def transcribir_audio(media_url: str, content_type: str | None = None) -> str:
-    """Descarga el audio de Twilio y lo transcribe a texto en español."""
+async def transcribir_audio(
+    media_url: str, content_type: str | None = None, datos: bytes | None = None
+) -> str:
+    """Transcribe una nota de voz a texto en español.
+
+    `datos` trae el audio ya bajado cuando el canal no da una URL directa
+    (Meta: un id que hay que canjear con su token). Sin eso, se baja de la
+    URL con el usuario de Twilio.
+    """
     settings = get_settings()
-    datos = await _descargar_media(media_url)
+    if datos is None:
+        datos = await _descargar_media(media_url)
     nombre = _nombre_archivo(content_type)
 
     if settings.groq_api_key:

@@ -111,6 +111,116 @@ def desglosar(payload: dict[str, Any]) -> list[dict]:
     return mensajes
 
 
+# --- recordatorio de cita ---
+#
+# Las plantillas viven en la cuenta de WhatsApp (WABA), no en el número: la
+# de Twilio se queda en la cuenta de Twilio y aquí hay que crearla de nuevo.
+# Ya que hay que pasar otra vez por la aprobación, va con lo que faltaba:
+# la dirección (para que nadie llegue al Liverpool equivocado) y tres
+# botones, que es lo que más baja las inasistencias: cancelar con un toque
+# libera el horario para alguien más.
+
+CUERPO_RECORDATORIO = (
+    "Hola {{1}}, te recordamos tu cita de estudio de pisada en {{2}} ({{3}}) "
+    "el {{4}} a las {{5}}. Te recomendamos llegar 10 minutos antes y con ropa "
+    "cómoda. ¿Nos confirmas tu asistencia?"
+)
+EJEMPLO_RECORDATORIO = [
+    "Diana", "Liverpool Polanco", "Mariano Escobedo 425, Polanco", "vie 26 sep", "11:00",
+]
+# (id que llega de vuelta al tocarlo, texto del botón)
+BOTONES_RECORDATORIO = [
+    ("recordatorio_confirmar", "Confirmo asistencia"),
+    ("recordatorio_reagendar", "Reagendar"),
+    ("recordatorio_cancelar", "Cancelar cita"),
+]
+
+
+def plantilla_recordatorio(nombre: str, idioma: str) -> dict:
+    """Lo que se manda a Meta para dar de alta la plantilla (una vez)."""
+    return {
+        "name": nombre,
+        "language": idioma,
+        "category": "UTILITY",
+        "components": [
+            {
+                "type": "BODY",
+                "text": CUERPO_RECORDATORIO,
+                "example": {"body_text": [EJEMPLO_RECORDATORIO]},
+            },
+            {
+                "type": "BUTTONS",
+                "buttons": [
+                    {"type": "QUICK_REPLY", "text": texto}
+                    for _, texto in BOTONES_RECORDATORIO
+                ],
+            },
+        ],
+    }
+
+
+def _parametro(valor: str, respaldo: str) -> str:
+    """Meta rechaza parámetros vacíos, con saltos de línea o muchos espacios."""
+    limpio = " ".join(str(valor or "").split())
+    return limpio or respaldo
+
+
+def cuerpo_recordatorio(
+    telefono: str, datos: dict[str, str], plantilla: str, idioma: str
+) -> dict:
+    """El envío de la plantilla a un cliente, con sus datos y los botones."""
+    nombre = _parametro(datos.get("nombre", ""), "hola").split()[0]
+    valores = [
+        nombre,
+        _parametro(datos.get("sucursal", ""), "Sidhe"),
+        # Hay sucursales sin dirección capturada (Atizapán): mejor esto que
+        # un parámetro vacío, que haría fallar el envío completo
+        _parametro(datos.get("direccion", ""), "dentro de Liverpool"),
+        _parametro(datos.get("fecha", ""), "tu fecha agendada"),
+        _parametro(datos.get("hora", ""), "la hora agendada"),
+    ]
+    return {
+        "messaging_product": "whatsapp",
+        "to": telefono,
+        "type": "template",
+        "template": {
+            "name": plantilla,
+            "language": {"code": idioma},
+            "components": [
+                {
+                    "type": "body",
+                    "parameters": [{"type": "text", "text": v} for v in valores],
+                },
+                *[
+                    {
+                        "type": "button",
+                        "sub_type": "quick_reply",
+                        "index": str(i),
+                        "parameters": [{"type": "payload", "payload": id_boton}],
+                    }
+                    for i, (id_boton, _) in enumerate(BOTONES_RECORDATORIO)
+                ],
+            ],
+        },
+    }
+
+
+def fallidos(payload: dict[str, Any]) -> list[dict]:
+    """Envíos que Meta reporta como fallidos, para dejarlos en el log.
+
+    Llegan por el mismo webhook, como estado de un mensaje nuestro. Sin
+    esto un mensaje que no llegó (ventana de 24 h vencida, número que no
+    tiene WhatsApp) no deja ningún rastro.
+    """
+    resultado = []
+    for entrada in payload.get("entry", []):
+        for cambio in entrada.get("changes", []):
+            for estado in (cambio.get("value") or {}).get("statuses") or []:
+                if estado.get("status") == "failed":
+                    resultado.append(estado)
+    return resultado
+
+
 class WhatsAppCloudAdapter(ChannelAdapter):
     """WhatsApp por la API de Meta. Mismo `canal` que el de Twilio.
 
@@ -139,12 +249,12 @@ class WhatsAppCloudAdapter(ChannelAdapter):
         # el mismo al que le escribieron
         self._ids_por_numero: dict[str, str] = {}
         if numero_por_defecto and phone_number_id:
-            self._ids_por_numero[_normalizar(numero_por_defecto)] = phone_number_id
+            self._ids_por_numero[clave_numero(numero_por_defecto)] = phone_number_id
 
     def registrar_numero(self, numero: str, phone_number_id: str) -> None:
         """Da de alta otro número del negocio (el 0202 junto al 5164)."""
         if numero and phone_number_id:
-            self._ids_por_numero[_normalizar(numero)] = phone_number_id
+            self._ids_por_numero[clave_numero(numero)] = phone_number_id
 
     # --- entrada ---
 
@@ -327,7 +437,7 @@ class WhatsAppCloudAdapter(ChannelAdapter):
         except Exception:
             logger.exception("error_resolviendo_numero_del_negocio")
             return self._phone_id
-        return self._ids_por_numero.get(_normalizar(numero or ""), self._phone_id)
+        return self._ids_por_numero.get(clave_numero(numero or ""), self._phone_id)
 
     async def _post(self, phone_id: str, cuerpo: dict) -> str | None:
         async with httpx.AsyncClient(timeout=TIMEOUT) as cliente:
@@ -346,6 +456,50 @@ class WhatsAppCloudAdapter(ChannelAdapter):
             return None
         mensajes = respuesta.json().get("messages") or [{}]
         return mensajes[0].get("id")
+
+    async def enviar_recordatorio(self, telefono: str, datos: dict[str, str]) -> str:
+        """Manda la plantilla de recordatorio. Revienta si Meta la rechaza,
+        para que el endpoint la cuente como error y no como enviada."""
+        from ..config import get_settings
+
+        ajustes = get_settings()
+        phone_id = await self._phone_id_para(telefono)
+        enviado = await self._post(
+            phone_id,
+            cuerpo_recordatorio(
+                telefono,
+                datos,
+                ajustes.whatsapp_cloud_plantilla_recordatorio,
+                ajustes.whatsapp_cloud_idioma_plantilla,
+            ),
+        )
+        if enviado is None:
+            raise RuntimeError("Meta rechazó el recordatorio (ver whatsapp_cloud_envio_rechazado)")
+        return enviado
+
+    async def marcar_leido(self, message_id: str, phone_number_id: str = "") -> None:
+        """Palomitas azules y "escribiendo…" mientras el bot arma la respuesta.
+
+        Tapa la espera de la ráfaga y la del modelo: el cliente ve que alguien
+        ya lo está atendiendo. No se cobra. Si falla, no pasa nada.
+        """
+        phone_id = phone_number_id or self._phone_id
+        if not message_id or not phone_id or not self._token:
+            return
+        try:
+            async with httpx.AsyncClient(timeout=TIMEOUT) as cliente:
+                await cliente.post(
+                    f"{self._base}/{phone_id}/messages",
+                    headers={"Authorization": f"Bearer {self._token}"},
+                    json={
+                        "messaging_product": "whatsapp",
+                        "status": "read",
+                        "message_id": message_id,
+                        "typing_indicator": {"type": "text"},
+                    },
+                )
+        except Exception:
+            logger.info("no_se_pudo_marcar_leido")
 
     # --- audio ---
 
@@ -392,6 +546,21 @@ def _normalizar(numero: str) -> str:
     """
     limpio = "".join(c for c in (numero or "") if c.isdigit())
     return f"+{limpio}" if limpio else ""
+
+
+def clave_numero(numero: str) -> str:
+    """Para COMPARAR números del negocio, no para guardarlos.
+
+    En México el mismo celular aparece como +52 1 56… o +52 56…, según quién
+    lo reporte (el "1" de los celulares que WhatsApp arrastra). Si Twilio lo
+    guardó de una forma y Meta lo manda de otra, sin esto la respuesta
+    saldría por el proveedor equivocado. El id del cliente NO pasa por aquí:
+    es la llave de su memoria y se queda exactamente como llega.
+    """
+    digitos = "".join(c for c in (numero or "") if c.isdigit())
+    if digitos.startswith("521") and len(digitos) == 13:
+        digitos = "52" + digitos[3:]
+    return digitos
 
 
 def _render_texto(mensaje: OutgoingMessage) -> str:

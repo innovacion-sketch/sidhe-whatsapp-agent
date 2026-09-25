@@ -175,6 +175,39 @@ class WhatsAppTwilioAdapter(ChannelAdapter):
         )
         return msg.sid
 
+    async def enviar_recordatorio(self, telefono: str, datos: dict[str, str]) -> str:
+        """La plantilla de Twilio: 4 variables, sin dirección ni botones.
+
+        Es la que ya está aprobada en la cuenta de Twilio; la nueva, con
+        botones, vive en la cuenta de Meta (channels/whatsapp_cloud.py).
+        """
+        from ..config import get_settings
+        from ..services.twilio_content import enviar_recordatorio
+
+        content_sid = get_settings().twilio_recordatorio_content_sid
+        if not content_sid:
+            raise RuntimeError(
+                "Falta TWILIO_RECORDATORIO_CONTENT_SID "
+                "(ejecuta scripts/setup_recordatorio_template.py)"
+            )
+        return await enviar_recordatorio(
+            self.client,
+            # Desde el número por el que agendó, no siempre el de siempre
+            await self.remitente_para(telefono),
+            telefono,
+            content_sid,
+            {
+                "1": datos.get("nombre", ""),
+                "2": datos.get("sucursal", ""),
+                "3": datos.get("fecha", ""),
+                "4": datos.get("hora", ""),
+            },
+        )
+
+    async def bajar_audio(self, media_url: str) -> tuple[bytes, str] | None:
+        """None: el audio de Twilio lo baja transcription con su usuario."""
+        return None
+
     def _render_texto(self, mensaje: OutgoingMessage) -> str:
         if mensaje.ui is None:
             return mensaje.texto

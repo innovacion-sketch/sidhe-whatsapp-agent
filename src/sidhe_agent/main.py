@@ -28,6 +28,9 @@ from sqlalchemy import select, text
 
 from .channels.schemas import IncomingMessage, OutgoingMessage, UIElement
 from .channels import meta as canal_meta
+from .channels import whatsapp_cloud
+from .channels.whatsapp_cloud import WhatsAppCloudAdapter
+from .channels.whatsapp_enrutador import WhatsAppEnrutador
 from .channels.whatsapp_twilio import WhatsAppTwilioAdapter, validar_firma
 from .config import get_settings
 from .db.models import Cita, Escalamiento, Mensaje, Slot, Sucursal
@@ -50,7 +53,6 @@ from .services import (
 from .services import respuestas_rapidas
 from .services.transcription import transcribir_audio
 from .services.rafagas import Agrupador
-from .services.twilio_content import enviar_recordatorio
 from .tools.citas import fecha_legible
 
 logger = structlog.get_logger(__name__)
@@ -102,6 +104,29 @@ def _cargar_system_prompt() -> str:
             "uv run python scripts/build_system_prompt.py"
         )
     return RUTA_SYSTEM_PROMPT.read_text(encoding="utf-8")
+
+
+def adaptador_whatsapp(settings: Any, twilio: Any) -> Any:
+    """Twilio solo, o el enrutador Twilio/Meta si ya hay números en Meta."""
+    mapa = settings.whatsapp_cloud_mapa
+    if not (settings.whatsapp_cloud_token and mapa):
+        return twilio
+    numero, phone_id = next(iter(mapa.items()))
+    cloud = WhatsAppCloudAdapter(
+        phone_number_id=phone_id,
+        token=settings.whatsapp_cloud_token,
+        numero_por_defecto=numero,
+        resolver_remitente=_numero_al_que_escribio,
+    )
+    for otro, su_id in mapa.items():
+        cloud.registrar_numero(otro, su_id)
+    return WhatsAppEnrutador(
+        twilio,
+        cloud,
+        set(mapa),
+        _numero_al_que_escribio,
+        numero_por_defecto=settings.twilio_whatsapp_from.removeprefix("whatsapp:"),
+    )
 
 
 def crear_llm(settings: Any, modelo: str) -> ChatAnthropic:
@@ -175,12 +200,15 @@ async def lifespan(app: FastAPI):
         resumidor=llm_utilitario,
         llm_agenda=llm_agenda,
     )
-    app.state.adapter = WhatsAppTwilioAdapter(
+    twilio = WhatsAppTwilioAdapter(
         account_sid=settings.twilio_account_sid,
         auth_token=settings.twilio_auth_token,
         from_number=settings.twilio_whatsapp_from,
         resolver_remitente=_numero_al_que_escribio,
     )
+    # Con números ya en Meta, un enrutador decide por dónde sale cada
+    # respuesta; sin ninguno, todo sigue por Twilio como siempre.
+    app.state.adapter = adaptador_whatsapp(settings, twilio)
     # Un adaptador por canal. Instagram y Messenger solo aparecen si tienen
     # token: sin el tramite de Meta terminado, esos canales no existen.
     app.state.adapters = {app.state.adapter.canal: app.state.adapter}
@@ -189,7 +217,11 @@ async def lifespan(app: FastAPI):
             settings.meta_token_instagram, settings.meta_token_messenger
         )
     )
-    logger.info("canales_activos", canales=sorted(app.state.adapters))
+    logger.info(
+        "canales_activos",
+        canales=sorted(app.state.adapters),
+        whatsapp_en_meta=sorted(settings.whatsapp_cloud_mapa),
+    )
     # Trampa fácil: el DSN completo gana sobre los datos sueltos, así que si
     # quedaron los dos puestos, los ASISTENCIAS_DB_* se ignoran en silencio.
     if settings.asistencias_database_url and settings.asistencias_db_host:
@@ -501,8 +533,15 @@ async def procesar_mensaje(app: FastAPI, entrante: IncomingMessage) -> None:
         if entrante.tipo == "audio":
             if not entrante.media_url:
                 raise ValueError("mensaje de audio sin media_url")
+            # Meta manda un id que se canjea con su token; Twilio, una URL
+            bajar = getattr(
+                _adaptador(app, entrante.canal) or app.state.adapter, "bajar_audio", None
+            )
+            bajado = await bajar(entrante.media_url) if bajar else None
             transcripcion = await transcribir_audio(
-                entrante.media_url, entrante.media_content_type
+                entrante.media_url,
+                bajado[1] if bajado else entrante.media_content_type,
+                datos=bajado[0] if bajado else None,
             )
             log.info("audio_transcrito", caracteres=len(transcripcion))
 
@@ -643,11 +682,11 @@ async def enviar_recordatorios(
     """
     _validar_api_key_interna(x_api_key)
     settings = get_settings()
-    if not settings.twilio_recordatorio_content_sid:
+    if not (settings.twilio_recordatorio_content_sid or settings.whatsapp_cloud_mapa):
         raise HTTPException(
             status_code=503,
-            detail="Falta TWILIO_RECORDATORIO_CONTENT_SID "
-            "(ejecuta scripts/setup_recordatorio_template.py)",
+            detail="No hay plantilla de recordatorio: falta "
+            "TWILIO_RECORDATORIO_CONTENT_SID o un número en WHATSAPP_CLOUD_NUMEROS",
         )
 
     tz = ZoneInfo(settings.tz)
@@ -685,17 +724,16 @@ async def enviar_recordatorios(
             omitidos += 1
             continue
         try:
-            sid = await enviar_recordatorio(
-                app.state.adapter.client,
-                # Desde el número por el que agendó, no siempre el de siempre
-                await app.state.adapter.remitente_para(cita.cliente_telefono),
+            # Sale por el proveedor que tenga hoy el número al que escribió
+            # (Twilio o Meta): cada uno con su plantilla aprobada
+            sid = await app.state.adapter.enviar_recordatorio(
                 cita.cliente_telefono,
-                settings.twilio_recordatorio_content_sid,
                 {
-                    "1": cita.cliente_nombre,
-                    "2": sucursal.nombre,
-                    "3": fecha_legible(slot.fecha),
-                    "4": slot.hora_inicio.strftime("%H:%M"),
+                    "nombre": cita.cliente_nombre,
+                    "sucursal": sucursal.nombre,
+                    "direccion": sucursal.direccion or "",
+                    "fecha": fecha_legible(slot.fecha),
+                    "hora": slot.hora_inicio.strftime("%H:%M"),
                 },
             )
             await _guardar_mensaje(
@@ -1017,6 +1055,79 @@ async def verificar_webhook_meta(request: Request) -> Response:
     Hay que devolverle textualmente el hub.challenge que manda; si no, el
     panel de Meta no deja guardar la URL.
     """
+    return _verificar_suscripcion(request)
+
+
+@app.get("/webhooks/whatsapp/cloud")
+async def verificar_webhook_whatsapp_cloud(request: Request) -> Response:
+    """Igual que el de Instagram/Messenger: misma app, mismo verify token."""
+    return _verificar_suscripcion(request)
+
+
+@app.post("/webhooks/whatsapp/cloud")
+async def webhook_whatsapp_cloud(
+    request: Request, background_tasks: BackgroundTasks
+) -> Response:
+    """WhatsApp directo con Meta, para los números que ya salieron de Twilio.
+
+    Mismo patrón que el de Twilio: validar firma, descartar reintentos,
+    guardar, contestar 200 de inmediato y procesar aparte. Si tardamos o
+    fallamos, Meta reintenta y el cliente recibe la respuesta dos veces.
+    """
+    settings = get_settings()
+    cuerpo = await request.body()
+    if not whatsapp_cloud.validar_firma(
+        cuerpo, request.headers.get("X-Hub-Signature-256", ""), settings.meta_app_secret
+    ):
+        logger.warning("firma_whatsapp_cloud_invalida")
+        raise HTTPException(status_code=403, detail="Firma de Meta inválida")
+    try:
+        payload = json.loads(cuerpo)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="cuerpo no es JSON") from exc
+
+    # Lo que Meta no pudo entregar: sin esto no deja ningún rastro
+    for estado in whatsapp_cloud.fallidos(payload):
+        logger.warning(
+            "whatsapp_cloud_envio_fallido",
+            destinatario=enmascarar_user_id(estado.get("recipient_id", "")),
+            errores=estado.get("errors"),
+        )
+
+    cloud = getattr(request.app.state.adapter, "cloud", None)
+    if cloud is None:
+        # Llegó algo pero no hay números en WHATSAPP_CLOUD_NUMEROS
+        logger.warning("webhook_whatsapp_cloud_sin_configurar")
+        return Response(status_code=200)
+
+    for parte in whatsapp_cloud.desglosar(payload):
+        entrante = cloud.parse_incoming(parte)
+        if not entrante.user_id:
+            continue
+        if entrante.message_sid and await _mensaje_ya_procesado(entrante.message_sid):
+            logger.info("webhook_duplicado_ignorado", wamid=entrante.message_sid)
+            continue
+        await _guardar_mensaje(
+            "in",
+            entrante.canal,
+            entrante.user_id,
+            entrante.tipo,
+            entrante.contenido,
+            item_id=entrante.item_id,
+            twilio_sid=entrante.message_sid,
+            numero_negocio=entrante.numero_negocio,
+        )
+        background_tasks.add_task(
+            cloud.marcar_leido,
+            entrante.message_sid,
+            (parte.get("metadata") or {}).get("phone_number_id", ""),
+        )
+        background_tasks.add_task(_despachar, request.app, entrante)
+
+    return Response(status_code=200)
+
+
+def _verificar_suscripcion(request: Request) -> Response:
     parametros = request.query_params
     esperado = get_settings().meta_verify_token
     if (

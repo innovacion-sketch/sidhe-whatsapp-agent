@@ -113,6 +113,17 @@ class Settings(BaseSettings):
     # sobre esta URL y no sobre la interna que ve uvicorn.
     public_base_url: str = ""
 
+    # WhatsApp directo con Meta (Cloud API), sin Twilio. Se migra número por
+    # número: aquí van SOLO los que ya están en nuestra WABA, con su
+    # phone_number_id. Los demás siguen saliendo por Twilio.
+    #   WHATSAPP_CLOUD_NUMEROS="+5215638950202=123456789012345"
+    # El webhook usa META_APP_SECRET y META_VERIFY_TOKEN (la misma app).
+    whatsapp_cloud_token: str = ""
+    whatsapp_cloud_numeros: str = ""
+    # La plantilla de recordatorio, creada con scripts/migrar_a_meta.py
+    whatsapp_cloud_plantilla_recordatorio: str = "sidhe_recordatorio_cita"
+    whatsapp_cloud_idioma_plantilla: str = "es_MX"
+
     # Transcripción de voz
     groq_api_key: str = ""
     openai_api_key: str = ""
@@ -191,6 +202,22 @@ class Settings(BaseSettings):
     # Sistema
     tz: str = "America/Mexico_City"
     log_level: str = "INFO"
+
+    @property
+    def whatsapp_cloud_mapa(self) -> dict[str, str]:
+        """{"+5215638950202": "123456789012345"} a partir de WHATSAPP_CLOUD_NUMEROS.
+
+        Un par mal escrito revienta: si se leyera a medias, las respuestas
+        de ese número saldrían por Twilio, que ya no lo tiene.
+        """
+        mapa = {}
+        for par in filter(None, (p.strip() for p in self.whatsapp_cloud_numeros.split(";"))):
+            numero, _, phone_id = par.partition("=")
+            digitos = "".join(c for c in numero if c.isdigit())
+            if not digitos or not phone_id.strip().isdigit():
+                raise ValueError(f"WHATSAPP_CLOUD_NUMEROS mal escrito: {par!r}")
+            mapa[f"+{digitos}"] = phone_id.strip()
+        return mapa
 
     @property
     def google_credentials(self) -> str:
