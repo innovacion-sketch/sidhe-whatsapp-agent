@@ -40,6 +40,7 @@ from .memory.long_term import crear_extractor
 from .observability import configurar_logging, enmascarar_user_id
 from .services import (
     agenda,
+    agenda_excel,
     alertas_citas,
     asistencias,
     cache_respuestas,
@@ -258,6 +259,10 @@ async def lifespan(app: FastAPI):
     # Citas de hoy en una sucursal donde nadie abrio: correo a los mismos
     # destinatarios que ya usa el sistema de asistencias.
     app.state.vigilancia_citas = asyncio.create_task(alertas_citas.vigilar())
+    # Citas que las sucursales anotan en la pestaña "Agendar" del Excel
+    app.state.agenda_excel = asyncio.create_task(
+        agenda_excel.vigilar(settings.citas_sheet_cada_segundos)
+    )
     app.state.agenda = asyncio.create_task(
         agenda.mantener_agenda_abierta(
             settings.agenda_dias_adelante, settings.agenda_minutos_por_cita
@@ -276,6 +281,7 @@ async def lifespan(app: FastAPI):
         app.state.sincronizador,
         app.state.agenda,
         app.state.vigilancia_citas,
+        app.state.agenda_excel,
     ):
         tarea.cancel()
         with suppress(asyncio.CancelledError):
@@ -724,6 +730,9 @@ async def enviar_recordatorios(
                     Cita.estado == "confirmada",
                     Slot.fecha >= ahora.date(),
                     Slot.fecha <= limite.date(),
+                    # Agendada en sucursal y el paciente no aceptó mensajes:
+                    # WhatsApp exige que haya aceptado, nunca le escribió
+                    Cita.canal != agenda_excel.CANAL_SUCURSAL_SIN_RECORDATORIO,
                 )
             )
         ).all()
@@ -759,7 +768,9 @@ async def enviar_recordatorios(
             )
             await _guardar_mensaje(
                 "out",
-                cita.canal,
+                # El recordatorio siempre sale por WhatsApp, aunque la cita se
+                # haya agendado en sucursal: así cae en su conversación
+                "whatsapp",
                 cita.cliente_telefono,
                 "recordatorio",
                 f"recordatorio de cita {cita.id}",

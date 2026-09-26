@@ -188,6 +188,13 @@ class Settings(BaseSettings):
     # entonces hay que sincronizar desde fuera con /internal/pedidos/sincronizar)
     pedidos_sincronizar_cada_horas: int = 2
 
+    # Excel de citas: las sucursales agendan desde una pestaña y el bot lo
+    # mete a la misma base (services/agenda_excel.py). Vacío = apagado. La
+    # cuenta de servicio necesita ser EDITORA del archivo.
+    citas_sheet_id: str = ""
+    citas_sheet_pestana: str = "Agendar"
+    citas_sheet_cada_segundos: int = 60
+
     # Meta: Instagram DM y Facebook Messenger. Cada red se activa sola al
     # poner su token; sin token, ese canal simplemente no existe.
     # El app secret valida la firma de los webhooks y el verify token es el
