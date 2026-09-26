@@ -200,3 +200,29 @@ async def test_cancelar_libera_cupo(datos):
     # Cancelar dos veces no procede
     repetido = await _cancelar_cita(cita["folio"], TEL_ANA)
     assert repetido["error"] == "cita_no_cancelable"
+
+
+async def test_no_se_agenda_un_horario_que_ya_paso(datos):
+    """El 25 de sep quedó una cita para el 5 de sep en Andares.
+
+    El horario viejo seguía en la base con su id y nada lo impedía. Ahora
+    se rechaza y se ofrecen horarios del futuro.
+    """
+    async with db_session.get_session() as session:
+        viejo = Slot(
+            sucursal_id=datos["perisur_id"],
+            fecha=datetime.date.today() - datetime.timedelta(days=20),
+            hora_inicio=datetime.time(20, 0),
+            hora_fin=datetime.time(21, 0),
+            capacidad=1,
+        )
+        session.add(viejo)
+        await session.commit()
+        viejo_id = viejo.id
+
+    resultado = await _agendar_cita(viejo_id, "Lisset", TEL_ANA, "whatsapp")
+
+    assert resultado["error"] == "horario_pasado"
+    assert "folio" not in resultado
+    hoy = datetime.date.today().isoformat()
+    assert all(alt["fecha"] >= hoy for alt in resultado["alternativas"])

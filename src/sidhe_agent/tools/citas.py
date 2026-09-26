@@ -171,6 +171,23 @@ async def _agendar_cita(
             slot = resultado.scalar_one_or_none()
             if slot is None:
                 return {"error": "slot_inexistente"}
+            # Un horario que ya pasó sigue en la base con su id, y nada impedía
+            # agendarlo: el 25 de sep quedó una cita para el 5 de sep en
+            # Andares. El agente puede traer un id de una lista vieja, y una
+            # sucursal que agenda desde el Excel puede equivocarse de mes.
+            ahora = _ahora()
+            inicio = datetime.datetime.combine(
+                slot.fecha, slot.hora_inicio, tzinfo=ahora.tzinfo
+            )
+            if inicio <= ahora:
+                return {
+                    "error": "horario_pasado",
+                    "que_decir": (
+                        "ese horario ya pasó; no lo menciones como disponible "
+                        "y ofrécele las alternativas"
+                    ),
+                    "alternativas": await _alternativas(session, slot),
+                }
             if slot.reservados >= slot.capacidad:
                 return {
                     "error": "slot_no_disponible",
